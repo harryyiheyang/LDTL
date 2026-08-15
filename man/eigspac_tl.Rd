@@ -8,7 +8,7 @@ eigspac_tl(
   X_target,
   S_source,
   rank,
-  center = FALSE,
+  center = TRUE,
   S_pilot = NULL,
   eigengap_tol = NULL
 )
@@ -26,7 +26,7 @@ between 1 and `ncol(X_target) - 1`.}
 
 \item{center}{If `TRUE`, subtract target sample column means. This gives a
 practical plug-in rule rather than the exact known-mean identity. The
-default is `FALSE`.}
+default is `TRUE`.}
 
 \item{S_pilot}{Optional covariance matrix used only to estimate the
 spectral-projector derivative. It should be independent of `X_target` for

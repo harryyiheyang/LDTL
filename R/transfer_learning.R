@@ -23,14 +23,14 @@
 #'   scale, and covariance normalization as the target covariance.
 #' @param center If `TRUE`, subtract target sample column means. This is useful
 #'   in practice but turns the exact known-mean URE into a plug-in rule. The
-#'   default is `FALSE`.
+#'   default is `TRUE`.
 #'
 #' @return An object of class `cov_tl`, represented by a list with the pooled
 #'   `covariance`, analytic `lambda` and `alpha`, target covariance, target
 #'   variance estimate, observed source-target squared distance, and URE
 #'   quadratic coefficients.
 #' @export
-cov_tl <- function(X_target, S_source, center = FALSE) {
+cov_tl <- function(X_target, S_source, center = TRUE) {
   target <- .ld_tl_target_moments(X_target, center = center)
   S_source <- .ld_tl_source_covariance(S_source, ncol(target$X))
 
@@ -97,7 +97,7 @@ cov_tl <- function(X_target, S_source, center = FALSE) {
 #'   between 1 and `ncol(X_target) - 1`.
 #' @param center If `TRUE`, subtract target sample column means. This gives a
 #'   practical plug-in rule rather than the exact known-mean identity. The
-#'   default is `FALSE`.
+#'   default is `TRUE`.
 #' @param S_pilot Optional covariance matrix used only to estimate the
 #'   spectral-projector derivative. It should be independent of `X_target` for
 #'   the conditional unbiased-risk interpretation.
@@ -113,7 +113,7 @@ eigspac_tl <- function(
     X_target,
     S_source,
     rank,
-    center = FALSE,
+    center = TRUE,
     S_pilot = NULL,
     eigengap_tol = NULL
 ) {

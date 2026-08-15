@@ -4,7 +4,7 @@
 \alias{cov_tl}
 \title{Tuning-free covariance transfer learning}
 \usage{
-cov_tl(X_target, S_source, center = FALSE)
+cov_tl(X_target, S_source, center = TRUE)
 }
 \arguments{
 \item{X_target}{Target individual-level data matrix, with observations in
@@ -16,7 +16,7 @@ scale, and covariance normalization as the target covariance.}
 
 \item{center}{If `TRUE`, subtract target sample column means. This is useful
 in practice but turns the exact known-mean URE into a plug-in rule. The
-default is `FALSE`.}
+default is `TRUE`.}
 }
 \value{
 An object of class `cov_tl`, represented by a list with the pooled

@@ -95,7 +95,6 @@ nonlinear_shrinkage <- function(X, shrinkage = 0, eigenmin = 1e-3, scale = FALSE
   delta <- pmax(as.numeric(delta), eigenmin)
   .ld_reconstruct_from_eigen(u, delta)
 }
-
 .ld_nonlinear_residual <- function(X, U, shrinkage = 0, eigenmin = 1e-3, scale = FALSE) {
   prepared <- .ld_prepare_matrix(X, "X", scale = scale)
   X_scaled <- prepared$X

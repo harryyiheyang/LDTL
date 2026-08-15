@@ -8,7 +8,8 @@ Description: This package provides methods for regularizing large-scale
     linkage disequilibrium (LD) matrix. It implements a variety of 
     regularization techniques, including shrinkage, nonlinear shrinkage,
     banding, tapering, thresholding, standard POET extensions, and
-    cluster-wise POET for LD matrices. The package enables efficient
+    tuning-free transfer learning for covariance matrices and eigenspaces.
+    The package enables efficient
     computation for high-dimensional LD matrix estimation via
     CppMatrix-backed matrix operations where possible.
 License: MIT + file LICENSE

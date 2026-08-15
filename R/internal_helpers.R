@@ -24,6 +24,38 @@
   (x + t(x)) / 2
 }
 
+.ld_matrix_multiply <- function(A, B, transA = FALSE, transB = FALSE) {
+  tryCatch(
+    CppMatrix::matrixMultiply(
+      A,
+      B,
+      transA = transA,
+      transB = transB
+    ),
+    error = function(e) {
+      if (isTRUE(transA)) {
+        A <- t(A)
+      }
+      if (isTRUE(transB)) {
+        B <- t(B)
+      }
+      A %*% B
+    }
+  )
+}
+
+.ld_center_columns <- function(x) {
+  tryCatch(
+    CppMatrix::matrixScale(
+      x,
+      center = TRUE,
+      standardized = FALSE,
+      robust = FALSE
+    ),
+    error = function(e) sweep(x, 2L, colMeans(x), "-")
+  )
+}
+
 .ld_eigen <- function(x) {
   x <- .ld_symmetrize(x)
   eig <- tryCatch(
@@ -74,7 +106,7 @@
     stop(name, " must have at least 2 rows and 1 column.", call. = FALSE)
   }
   out <- tryCatch(
-    CppMatrix::matrixMultiply(x, x, transA = TRUE) / (nrow(x) - 1L),
+    .ld_matrix_multiply(x, x, transA = TRUE) / (nrow(x) - 1L),
     error = function(e) crossprod(x) / (nrow(x) - 1L)
   )
   .ld_clean_correlation(out, "correlation matrix")

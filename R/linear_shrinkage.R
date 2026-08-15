@@ -10,18 +10,17 @@
 #'   Default is `FALSE`, assuming `X` has already been scaled.
 #' @param alpha Shrinkage intensity in `[0, 1]`. Default is 0.05.
 #' @param target Optional shrinkage target. Defaults to the identity matrix.
-#' @param eigenmin Minimum eigenvalue target for FSPD. Default is 0.001.
 #' @param lambda Deprecated alias for `alpha`, kept for backward
 #'   compatibility.
 #'
-#' @return A regularized correlation matrix after shrinkage.
+#' @return A positive-semidefinite regularized correlation matrix after
+#'   shrinkage.
 #' @export
 linear_shrinkage <- function(
     S = NULL,
     X = NULL,
     alpha = 0.05,
     target = NULL,
-    eigenmin = 1e-3,
     lambda = NULL,
     scale = FALSE
 ) {
@@ -49,7 +48,7 @@ linear_shrinkage <- function(
   alpha <- min(max(alpha[1L], 0), 1)
 
   out <- .ld_symmetrize(alpha * target + (1 - alpha) * S)
-  out <- .ld_fspd(out, eigenmin = eigenmin)
+  out <- .ld_fspd(out, eig_min = 0)
   out <- stats::cov2cor(out)
   out[is.na(out)] <- 0
   out <- .ld_symmetrize(out)

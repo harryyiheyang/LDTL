@@ -9,7 +9,7 @@ tapering(
   n = NULL,
   K = NULL,
   alpha = 1,
-  eigenmin = 0.001,
+  eig_min = 0,
   X = NULL,
   scale = FALSE
 )
@@ -25,7 +25,7 @@ default.}
 \item{alpha}{Bandable covariance smoothness parameter used in the theoretical
 bandwidth. Default is 1.}
 
-\item{eigenmin}{Minimum eigenvalue target for FSPD. Default is 0.001.}
+\item{eig_min}{Minimum eigenvalue target for FSPD. Default is 0.}
 
 \item{X}{Optional individual-level data matrix. Used to compute `A` when
 `A` is not supplied and to infer `n` for the default bandwidth.}
@@ -34,7 +34,8 @@ bandwidth. Default is 1.}
 Default is `FALSE`, assuming `X` has already been scaled.}
 }
 \value{
-A positive-definite tapered covariance matrix.
+A positive-semidefinite tapered covariance matrix. Set `eig_min` to a
+  positive value to require strict positive definiteness.
 }
 \description{
 Keep entries with `|i - j| <= K`, linearly taper entries until

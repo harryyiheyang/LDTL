@@ -13,15 +13,16 @@
 #' @param n Sample size used to form `S`. Required when `lambda` is not supplied.
 #' @param lambda Optional scalar or matrix threshold. If supplied, it overrides
 #'   the theoretical default.
-#' @param eigenmin Minimum eigenvalue target for FSPD. Default is 0.001.
+#' @param eig_min Minimum eigenvalue target for FSPD. Default is 0.
 #'
-#' @return A positive-definite thresholded covariance matrix.
+#' @return A positive-semidefinite thresholded covariance matrix. Set `eig_min`
+#'   to a positive value to require strict positive definiteness.
 #' @export
 thresholding <- function(
     S = NULL,
     n = NULL,
     lambda = NULL,
-    eigenmin = 1e-3,
+    eig_min = 0,
     X = NULL,
     scale = FALSE
 ) {
@@ -55,5 +56,5 @@ thresholding <- function(
   Sigma <- .ld_symmetrize(Sigma)
   diag(Sigma) <- diag_vals^2
 
-  .ld_fspd(Sigma, eigenmin = eigenmin)
+  .ld_fspd(Sigma, eig_min = eig_min)
 }

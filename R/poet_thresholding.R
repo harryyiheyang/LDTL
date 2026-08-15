@@ -13,15 +13,16 @@
 #'   `lambda` is not supplied.
 #' @param lambda Optional scalar threshold. Overrides the theoretical default.
 #'   If missing, `2 * max(sqrt(log(p) / n), 1 / sqrt(p))` is used.
-#' @param eigenmin Minimum eigenvalue target for FSPD. Default is 0.001.
+#' @param eig_min Minimum eigenvalue target for FSPD. Default is 0.
 #'
-#' @return A positive-definite POET regularized correlation matrix.
+#' @return A positive-semidefinite POET regularized correlation matrix. Set
+#'   `eig_min` to a positive value to require strict positive definiteness.
 #' @export
 poet_thresholding <- function(
     S = NULL,
     n = NULL,
     lambda = NULL,
-    eigenmin = 1e-3,
+    eig_min = 0,
     X = NULL,
     scale = FALSE
 ) {
@@ -45,7 +46,7 @@ poet_thresholding <- function(
   E_reg <- thresholding(
     comp$E,
     lambda = resolved_lambda,
-    eigenmin = eigenmin
+    eig_min = eig_min
   )
 
   Shat <- .ld_symmetrize(comp$P + E_reg)

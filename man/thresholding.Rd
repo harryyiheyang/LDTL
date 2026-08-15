@@ -8,7 +8,7 @@ thresholding(
   S = NULL,
   n = NULL,
   lambda = NULL,
-  eigenmin = 0.001,
+  eig_min = 0,
   X = NULL,
   scale = FALSE
 )
@@ -21,7 +21,7 @@ thresholding(
 \item{lambda}{Optional scalar or matrix threshold. If supplied, it overrides
 the theoretical default.}
 
-\item{eigenmin}{Minimum eigenvalue target for FSPD. Default is 0.001.}
+\item{eig_min}{Minimum eigenvalue target for FSPD. Default is 0.}
 
 \item{X}{Optional individual-level data matrix. Used to compute `S` when
 `S` is not supplied and to infer `n` for the default threshold.}
@@ -30,7 +30,8 @@ the theoretical default.}
 Default is `FALSE`, assuming `X` has already been scaled.}
 }
 \value{
-A positive-definite thresholded covariance matrix.
+A positive-semidefinite thresholded covariance matrix. Set `eig_min`
+  to a positive value to require strict positive definiteness.
 }
 \description{
 Threshold the off-diagonal entries of the correlation version of a covariance

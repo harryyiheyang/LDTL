@@ -10,20 +10,18 @@
 #'   it is computed from `X`.
 #' @param n Optional sample size. Inferred from `X` when omitted.
 #' @param shrinkage Mixing weight for the nonlinear residual estimator.
-#'   Default is 0, which keeps the sample residual and only applies the
-#'   positive-definite safeguard.
-#' @param eigenmin Minimum eigenvalue target. Default is 0.001.
+#'   Default is 0, which keeps the sample residual and applies the
+#'   positive-semidefinite safeguard.
 #' @param scale If `TRUE`, center and standardize `X` before estimation.
 #'   Default is `FALSE`, assuming `X` has already been scaled.
 #'
-#' @return A positive-definite POET regularized correlation matrix.
+#' @return A positive-semidefinite POET regularized correlation matrix.
 #' @export
 poet_nonlinear_shrinkage <- function(
     X,
     S = NULL,
     n = NULL,
     shrinkage = 0,
-    eigenmin = 1e-3,
     scale = FALSE
 ) {
   if (missing(X) || is.null(X)) {
@@ -43,10 +41,9 @@ poet_nonlinear_shrinkage <- function(
     input$X,
     comp$U,
     shrinkage = shrinkage,
-    eigenmin = eigenmin,
     scale = FALSE
   )
-  out <- .ld_fspd(.ld_symmetrize(comp$P + E_reg), eigenmin = eigenmin)
+  out <- .ld_fspd(.ld_symmetrize(comp$P + E_reg), eig_min = 0)
   out <- stats::cov2cor(out)
   out[is.na(out)] <- 0
   out <- .ld_symmetrize(out)

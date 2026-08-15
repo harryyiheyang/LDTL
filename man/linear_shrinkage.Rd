@@ -9,7 +9,6 @@ linear_shrinkage(
   X = NULL,
   alpha = 0.05,
   target = NULL,
-  eigenmin = 0.001,
   lambda = NULL,
   scale = FALSE
 )
@@ -24,8 +23,6 @@ linear_shrinkage(
 
 \item{target}{Optional shrinkage target. Defaults to the identity matrix.}
 
-\item{eigenmin}{Minimum eigenvalue target for FSPD. Default is 0.001.}
-
 \item{lambda}{Deprecated alias for `alpha`, kept for backward
 compatibility.}
 
@@ -33,7 +30,8 @@ compatibility.}
 Default is `FALSE`, assuming `X` has already been scaled.}
 }
 \value{
-A regularized correlation matrix after shrinkage.
+A positive-semidefinite regularized correlation matrix after
+  shrinkage.
 }
 \description{
 Shrink a sample correlation matrix toward a target matrix. The default

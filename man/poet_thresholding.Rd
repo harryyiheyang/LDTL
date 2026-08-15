@@ -8,7 +8,7 @@ poet_thresholding(
   S = NULL,
   n = NULL,
   lambda = NULL,
-  eigenmin = 0.001,
+  eig_min = 0,
   X = NULL,
   scale = FALSE
 )
@@ -22,7 +22,7 @@ poet_thresholding(
 \item{lambda}{Optional scalar threshold. Overrides the theoretical default.
 If missing, `2 * max(sqrt(log(p) / n), 1 / sqrt(p))` is used.}
 
-\item{eigenmin}{Minimum eigenvalue target for FSPD. Default is 0.001.}
+\item{eig_min}{Minimum eigenvalue target for FSPD. Default is 0.}
 
 \item{X}{Optional individual-level data matrix. Used to compute `S` when
 `S` is not supplied and to infer `n`.}
@@ -31,7 +31,8 @@ If missing, `2 * max(sqrt(log(p) / n), 1 / sqrt(p))` is used.}
 Default is `FALSE`, assuming `X` has already been scaled.}
 }
 \value{
-A positive-definite POET regularized correlation matrix.
+A positive-semidefinite POET regularized correlation matrix. Set
+  `eig_min` to a positive value to require strict positive definiteness.
 }
 \description{
 Estimate a factor component from the leading eigenpairs of `S`, threshold the

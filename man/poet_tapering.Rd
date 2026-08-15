@@ -9,7 +9,7 @@ poet_tapering(
   n = NULL,
   K = NULL,
   alpha = 1,
-  eigenmin = 0.001,
+  eig_min = 0,
   X = NULL,
   scale = FALSE
 )
@@ -25,7 +25,7 @@ poet_tapering(
 \item{alpha}{Bandable covariance smoothness parameter used in the theoretical
 bandwidth. Default is 1.}
 
-\item{eigenmin}{Minimum eigenvalue target for FSPD. Default is 0.001.}
+\item{eig_min}{Minimum eigenvalue target for FSPD. Default is 0.}
 
 \item{X}{Optional individual-level data matrix. Used to compute `S` when
 `S` is not supplied and to infer `n`.}
@@ -34,7 +34,8 @@ bandwidth. Default is 1.}
 Default is `FALSE`, assuming `X` has already been scaled.}
 }
 \value{
-A positive-definite POET regularized correlation matrix.
+A positive-semidefinite POET regularized correlation matrix. Set
+  `eig_min` to a positive value to require strict positive definiteness.
 }
 \description{
 Estimate a factor component from the leading eigenpairs of `S`, taper the

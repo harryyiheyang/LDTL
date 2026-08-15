@@ -247,7 +247,7 @@
   stats::toeplitz(w)
 }
 
-.ld_fspd <- function(x, eigenmin = 1e-3, method = "FSopt", verbose = FALSE) {
+.ld_fspd <- function(x, eig_min = 0, method = "FSopt", verbose = FALSE) {
   x <- .ld_symmetrize(x)
   p <- nrow(x)
   method <- match.arg(method, c("FSopt", "Sopt", "Fopt", "Max", "Infty"))
@@ -267,13 +267,13 @@
     min_after = lmin
   )
 
-  if (!is.finite(lmin) || lmin >= eigenmin) {
+  if (!is.finite(lmin) || lmin >= eig_min) {
     attr(x, "fspd") <- info
     return(x)
   }
 
   if (identical(method, "Infty")) {
-    out <- x + diag(eigenmin - lmin, p)
+    out <- x + diag(eig_min - lmin, p)
     out <- .ld_symmetrize(out)
     info$operated <- TRUE
     info$alpha <- NA_real_
@@ -299,7 +299,7 @@
   )
 
   if (!is.finite(target) || target <= lmin + .Machine$double.eps) {
-    out <- x + diag(eigenmin - lmin, p)
+    out <- x + diag(eig_min - lmin, p)
     out <- .ld_symmetrize(out)
     info$operated <- TRUE
     info$alpha <- NA_real_
@@ -309,15 +309,15 @@
     return(out)
   }
 
-  alpha <- 1 - (eigenmin - lmin) / (target - lmin)
+  alpha <- 1 - (eig_min - lmin) / (target - lmin)
   alpha <- min(max(alpha, 0), 1)
   out <- alpha * x
   diag(out) <- diag(out) + (1 - alpha) * target
   out <- .ld_symmetrize(out)
 
   min_after <- .ld_min_eigen(out)
-  if (is.finite(min_after) && min_after < eigenmin) {
-    diag(out) <- diag(out) + (eigenmin - min_after)
+  if (is.finite(min_after) && min_after < eig_min) {
+    diag(out) <- diag(out) + (eig_min - min_after)
     out <- .ld_symmetrize(out)
     min_after <- .ld_min_eigen(out)
   }

@@ -15,16 +15,17 @@
 #'   default.
 #' @param alpha Bandable covariance smoothness parameter used in the theoretical
 #'   bandwidth. Default is 1.
-#' @param eigenmin Minimum eigenvalue target for FSPD. Default is 0.001.
+#' @param eig_min Minimum eigenvalue target for FSPD. Default is 0.
 #'
-#' @return A positive-definite banded covariance matrix.
+#' @return A positive-semidefinite banded covariance matrix. Set `eig_min` to a
+#'   positive value to require strict positive definiteness.
 #' @export
 banding <- function(
     A = NULL,
     n = NULL,
     K = NULL,
     alpha = 1,
-    eigenmin = 1e-3,
+    eig_min = 0,
     X = NULL,
     scale = FALSE
 ) {
@@ -38,5 +39,5 @@ banding <- function(
   W <- .ld_band_weight(p, K)
   Areg <- .ld_symmetrize(A * W)
 
-  .ld_fspd(Areg, eigenmin = eigenmin)
+  .ld_fspd(Areg, eig_min = eig_min)
 }

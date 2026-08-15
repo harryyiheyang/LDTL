@@ -60,7 +60,7 @@ linear shrinkage uses `alpha = 0.5` by default. Nonlinear shrinkage has
 `shrinkage = 0` by default, so scripts should set it explicitly, for example
 `shrinkage = 0.5`, when a stronger nonlinear component is desired.
 
-Sparse estimators are made positive definite with fixed-support positive-definite (FSPD) linear shrinkage, using `eigenmin = 0.001` by default. FSPD is a final safeguard and does not choose the sparsity tuning parameter.
+Sparse estimators are made positive semidefinite with fixed-support linear shrinkage, using `eig_min = 0` by default. Set a positive `eig_min` only when downstream computations require a strictly positive-definite matrix. FSPD is a final safeguard and does not choose the sparsity tuning parameter.
 
 ## Dependencies
 

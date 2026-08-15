@@ -5,21 +5,20 @@
 #'
 #' @param X Individual-level data matrix with observations in rows.
 #' @param shrinkage Mixing weight for the nonlinear shrinkage estimator.
-#'   Default is 0, which returns the positive-definite sample correlation
-#'   matrix. Use 1 for the full nonlinear shrinkage estimator.
-#' @param eigenmin Minimum eigenvalue target. Default is 0.001.
+#'   Default is 0, which returns the sample correlation matrix. Use 1 for the
+#'   full nonlinear shrinkage estimator.
 #' @param scale If `TRUE`, center and standardize `X` before estimation.
 #'   Default is `FALSE`, assuming `X` has already been scaled.
 #'
-#' @return A positive-definite nonlinear-shrinkage correlation matrix.
+#' @return A positive-semidefinite nonlinear-shrinkage correlation matrix.
 #' @export
-nonlinear_shrinkage <- function(X, shrinkage = 0, eigenmin = 1e-3, scale = FALSE) {
+nonlinear_shrinkage <- function(X, shrinkage = 0, scale = FALSE) {
   if (missing(X) || is.null(X)) {
     stop("nonlinear_shrinkage requires individual-level X.", call. = FALSE)
   }
   prepared <- .ld_prepare_matrix(X, "X", scale = scale)
   S_sample <- .ld_matrix_cor(prepared$X, scale = FALSE)
-  S_nl <- .ld_nonlinear_qis(prepared$X, eigenmin = eigenmin)
+  S_nl <- .ld_nonlinear_qis(prepared$X)
   S_nl <- stats::cov2cor(S_nl)
   S_nl[is.na(S_nl)] <- 0
   S_nl <- .ld_symmetrize(S_nl)
@@ -30,7 +29,7 @@ nonlinear_shrinkage <- function(X, shrinkage = 0, eigenmin = 1e-3, scale = FALSE
   }
   shrinkage <- min(max(shrinkage[1L], 0), 1)
   out <- (1 - shrinkage) * S_sample + shrinkage * S_nl
-  out <- .ld_fspd(.ld_symmetrize(out), eigenmin = eigenmin)
+  out <- .ld_fspd(.ld_symmetrize(out), eig_min = 0)
   out <- stats::cov2cor(out)
   out[is.na(out)] <- 0
   out <- .ld_symmetrize(out)
@@ -50,7 +49,7 @@ nonlinear_shrinkage <- function(X, shrinkage = 0, eigenmin = 1e-3, scale = FALSE
 }
 
 # Adapted from covShrinkage QIS by Ledoit and Wolf (MIT License, 2022).
-.ld_nonlinear_qis <- function(X, eigenmin = 1e-3) {
+.ld_nonlinear_qis <- function(X) {
   X <- .ld_as_matrix(X, "X")
   N <- nrow(X)
   p <- ncol(X)
@@ -71,7 +70,7 @@ nonlinear_shrinkage <- function(X, shrinkage = 0, eigenmin = 1e-3, scale = FALSE
 
   h <- min(c_ratio^2, 1 / c_ratio^2)^0.35 / p^0.35
   nonzero_index <- max(1L, p - n + 1L):p
-  lambda_nonzero <- pmax(lambda[nonzero_index], max(eigenmin, .Machine$double.eps))
+  lambda_nonzero <- pmax(lambda[nonzero_index], .Machine$double.eps)
   invlambda <- 1 / lambda_nonzero
 
   m <- min(p, n)
@@ -92,10 +91,10 @@ nonlinear_shrinkage <- function(X, shrinkage = 0, eigenmin = 1e-3, scale = FALSE
     delta <- c(rep(delta0, p - n), 1 / (invlambda * Atheta2))
   }
   delta <- delta * (sum(lambda) / sum(delta))
-  delta <- pmax(as.numeric(delta), eigenmin)
+  delta <- pmax(as.numeric(delta), .Machine$double.eps)
   .ld_reconstruct_from_eigen(u, delta)
 }
-.ld_nonlinear_residual <- function(X, U, shrinkage = 0, eigenmin = 1e-3, scale = FALSE) {
+.ld_nonlinear_residual <- function(X, U, shrinkage = 0, scale = FALSE) {
   prepared <- .ld_prepare_matrix(X, "X", scale = scale)
   X_scaled <- prepared$X
   p <- ncol(X_scaled)
@@ -107,9 +106,9 @@ nonlinear_shrinkage <- function(X, shrinkage = 0, eigenmin = 1e-3, scale = FALSE
   Z <- CppMatrix::matrixMultiply(X_scaled, B)
   S_sample <- CppMatrix::matrixMultiply(Z, Z, transA = TRUE) / prepared$n_eff
   S_sample <- .ld_symmetrize(S_sample)
-  S_nl <- .ld_nonlinear_qis(Z, eigenmin = eigenmin)
+  S_nl <- .ld_nonlinear_qis(Z)
   shrinkage <- min(max(shrinkage[1L], 0), 1)
   S_B <- (1 - shrinkage) * S_sample + shrinkage * S_nl
-  S_B <- .ld_fspd(.ld_symmetrize(S_B), eigenmin = eigenmin)
+  S_B <- .ld_fspd(.ld_symmetrize(S_B), eig_min = 0)
   .ld_symmetrize(CppMatrix::matrixMultiply(CppMatrix::matrixMultiply(B, S_B), B, transB = TRUE))
 }

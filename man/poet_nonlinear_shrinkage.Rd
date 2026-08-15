@@ -4,14 +4,7 @@
 \alias{poet_nonlinear_shrinkage}
 \title{POET with nonlinear shrinkage of the idiosyncratic component}
 \usage{
-poet_nonlinear_shrinkage(
-  X,
-  S = NULL,
-  n = NULL,
-  shrinkage = 0,
-  eigenmin = 0.001,
-  scale = FALSE
-)
+poet_nonlinear_shrinkage(X, S = NULL, n = NULL, shrinkage = 0, scale = FALSE)
 }
 \arguments{
 \item{X}{Individual-level data matrix with observations in rows.}
@@ -22,16 +15,14 @@ it is computed from `X`.}
 \item{n}{Optional sample size. Inferred from `X` when omitted.}
 
 \item{shrinkage}{Mixing weight for the nonlinear residual estimator.
-Default is 0, which keeps the sample residual and only applies the
-positive-definite safeguard.}
-
-\item{eigenmin}{Minimum eigenvalue target. Default is 0.001.}
+Default is 0, which keeps the sample residual and applies the
+positive-semidefinite safeguard.}
 
 \item{scale}{If `TRUE`, center and standardize `X` before estimation.
 Default is `FALSE`, assuming `X` has already been scaled.}
 }
 \value{
-A positive-definite POET regularized correlation matrix.
+A positive-semidefinite POET regularized correlation matrix.
 }
 \description{
 Estimate a factor component from the leading eigenpairs of the target

@@ -38,38 +38,31 @@ The package currently includes the following main functions:
 - nonlinear_shrinkage: Standalone mixed nonlinear shrinkage for individual-level
   data.
 
-- cov_tl: Tuning-free covariance transfer learning. It estimates the optimal
-  source pooling rate from the closed-form covariance URE criterion, without
-  cross-validation or a tuning grid.
+- cov_tl: Tuning-free covariance transfer learning. A source covariance matrix
+  uses the summary-only URE rule; an `ld_source_moments` object automatically
+  includes finite-source noise.
 
 - source_moments_method: C++/OpenMP individual-block preprocessing of a source
   cohort. It returns a reusable source covariance and scalar fourth-moment
   noise estimate without retaining the source individuals.
 
-- cov_tl_stabilized: Finite-source stabilized covariance transfer learning.
-  This is a separate estimator from `cov_tl`; it uses source fourth-moment
-  information when an `ld_source_moments` object is supplied.
-
-- eigspac_tl: Tuning-free eigenspace transfer learning. It estimates the optimal
-  first-order pooling rate in spectral-projector tangent geometry and returns
-  the pooled leading eigenspace.
-
-- eigspac_tl_stabilized: A separate finite-source eigenspace rule. Because a
-  scalar source fourth moment does not identify arbitrary target-direction
-  tangent noise, it either uses a supplied target-specific tangent variance or
-  an explicitly labelled Frobenius/eigengap upper proxy.
+- eigspac_tl: Tuning-free eigenspace transfer learning. It estimates the
+  first-order pooling rate in spectral-projector tangent geometry. Source
+  moments automatically activate the finite-source tangent-noise proxy; a
+  covariance matrix uses the summary-only rule.
 
 Most matrix estimators accept either a precomputed matrix (`S` or `A`) or
 individual-level data `X`. Nonlinear shrinkage requires `X`. The POET functions
-automatically select the number of latent factors via the ratio-type criterion.
+use ACT factor selection by default, retain `D.ratio` as an option, and accept an
+optional reusable full eigendecomposition through `eig`.
 Sparse methods use theory-rate defaults only when the user does not supply the
 tuning parameter. Standalone thresholding uses
 `lambda = 2 * sqrt(log(p) / n)`, while POET thresholding uses
 `lambda = 2 * max(sqrt(log(p) / n), 1 / sqrt(p))`. Banding and tapering use
 `K = ceiling(n^(1 / (2 * alpha + 1)))` with `alpha = 1` by default, capped at
 `floor(p / 2)`. These defaults require `n`; otherwise pass `lambda` or `K`
-directly. Standalone linear shrinkage uses `alpha = 0.05` by default; POET
-linear shrinkage uses `alpha = 0.5` by default. Nonlinear shrinkage has
+directly. Standalone and POET linear shrinkage use a Gaussian/Wishart MSE
+plug-in intensity capped at `alpha = 0.05`. Nonlinear shrinkage has
 `shrinkage = 0` by default, so scripts should set it explicitly, for example
 `shrinkage = 0.5`, when a stronger nonlinear component is desired.
 
@@ -130,13 +123,13 @@ source_fit <- source_moments_method(
   n_threads = 20
 )
 
-cov_stable <- cov_tl_stabilized(
+cov_finite <- cov_tl(
   X_target,
   source_fit,
   center = FALSE
 )
 
-eig_stable <- eigspac_tl_stabilized(
+eig_finite <- eigspac_tl(
   X_target,
   source_fit,
   rank = 3,
@@ -152,9 +145,9 @@ computes only `sum_i ||X_source[i, ]||^4`, reducing the extra work to
 The covariance output is still `p` by `p`, so variant/LD-region blocking is a
 separate requirement when `p` itself is too large.
 
-The legacy and finite-source estimators deliberately have different entry
-points. Calling `cov_tl()` or `eigspac_tl()` never silently activates a
-stabilized weight.
+The public `cov_tl()` and `eigspac_tl()` entry points select the branch from the
+source object. The original summary-only analytic implementations remain
+internal as `cov_tl1()` and `eigspac_tl1()`.
 
 Teacher B's path-adaptive framework is exposed through two more independent
 entry points. Both interpret each grid value as an effective fraction of the
@@ -183,41 +176,10 @@ path_one_se <- path_tpca_one_se(
 `path_tpca_one_se()` instead selects the largest source fraction whose paired
 per-individual score deficit is within one standard error of that maximizer.
 These two path estimators use the source covariance and sample size, but not
-the fourth moment. Thus the package now keeps six public estimators separate:
-legacy CovTL and EigenTL, their finite-source fourth-moment variants, and the
-two Teacher-B covariance-path refits.
-
-Choose a common target subspace dimension before comparing the eigenspace and
-path estimators. `select_tl_rank_bootstrap()` treats cumulative variance as an
-operational compression goal rather than a finite-spike rank. It fixes a core
-below a 50-percent anchor, leaves a guard band flexible, and uses individual
-bootstrap samples only in a randomized projected score space:
-
-```r
-rank_fit <- select_tl_rank_bootstrap(
-  X_target,
-  target_fraction_grid = c(.5, .6, .7, .8, .9),
-  selection_fraction = .8,
-  anchor_fraction = .5,
-  guard_fraction = .05,
-  n_boot = 100,
-  n_threads = 20
-)
-
-K <- rank_fit$rank
-rank_fit$rank_path
-
-eig_fit <- eigspac_tl(X_target, S_source, rank = K)
-path_fit <- path_tpca_one_se(X_target, source_fit, rank = K)
-```
-
-The 0.8 target is user-defined; the out-of-bag bootstrap lower quantile is the
-data-driven quantity. Flexible directions are fitted on in-bag individuals and
-their captured variance is evaluated out of bag. Stability is audited at the
-smallest rank reaching each target but does not push the rank upward, because
-normalized projector loss can decrease mechanically near the full flexible
-space. No source data, bootstrap `p` by `p` covariance, or repeated full
-eigendecomposition is used by this selector.
+the fourth moment. The public transfer-learning API therefore consists of
+`cov_tl()`, `eigspac_tl()`, `path_tpca_max_score()`, and
+`path_tpca_one_se()`. A common subspace dimension should be chosen externally
+before comparing the eigenspace and path estimators.
 
 Both transfer-learning functions prioritize `CppMatrix` for covariance
 construction, matrix products, centering, projector construction, and spectral

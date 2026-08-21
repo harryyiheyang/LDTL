@@ -3,7 +3,8 @@
 #' Estimate a factor component from the leading eigenpairs of the target
 #' correlation matrix, then regularize the idiosyncratic component in the
 #' orthogonal complement with nonlinear shrinkage. The nonlinear estimator is
-#' blended with the sample residual covariance, controlled by `shrinkage`.
+#' blended with the sample residual covariance, controlled by `shrinkage`. The
+#' selected spike eigenvalues receive the S-POET positive-part bias correction.
 #'
 #' @param X Individual-level data matrix with observations in rows.
 #' @param S Optional symmetric covariance or correlation matrix. If omitted,
@@ -14,6 +15,13 @@
 #'   positive-semidefinite safeguard.
 #' @param scale If `TRUE`, center and standardize `X` before estimation.
 #'   Default is `FALSE`, assuming `X` has already been scaled.
+#' @param factor_method Method used to select the number of POET factors.
+#'   `"ACT"` uses adjusted correlation thresholding and is the default;
+#'   `"D.ratio"` uses the eigenvalue difference-ratio rule. The lower bound is
+#'   5 and the upper bound is the rank reaching 90 percent cumulative
+#'   eigenvalue mass.
+#' @param eig Optional full eigendecomposition of `S`, supplied as a list with
+#'   `values` and `vectors`. If `NULL`, it is computed internally.
 #'
 #' @return A positive-semidefinite POET regularized correlation matrix.
 #' @export
@@ -22,8 +30,11 @@ poet_nonlinear_shrinkage <- function(
     S = NULL,
     n = NULL,
     shrinkage = 0,
-    scale = FALSE
+    scale = FALSE,
+    factor_method = c("ACT", "D.ratio"),
+    eig = NULL
 ) {
+  factor_method <- match.arg(factor_method)
   if (missing(X) || is.null(X)) {
     stop("poet_nonlinear_shrinkage requires individual-level X.", call. = FALSE)
   }
@@ -32,9 +43,10 @@ poet_nonlinear_shrinkage <- function(
   comp <- .ld_poet_components(
     input$S,
     n,
-    cutoff_method = "D.ratio",
+    cutoff_method = factor_method,
     k_min = 5,
-    k_max = min(15, floor(nrow(input$S) / 2))
+    k_max = NULL,
+    eig = eig
   )
 
   E_reg <- .ld_nonlinear_residual(

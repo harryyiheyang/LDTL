@@ -4,41 +4,27 @@
 \alias{cov_tl}
 \title{Tuning-free covariance transfer learning}
 \usage{
-cov_tl(X_target, S_source, center = TRUE)
+cov_tl(X_target, source, center = TRUE)
 }
 \arguments{
-\item{X_target}{Target individual-level data matrix, with observations in
-rows. For the exact finite-sample URE identity, its rows should be
-independent and already centered at the known population mean.}
+\item{X_target}{Target individual-level matrix with observations in rows.}
 
-\item{S_source}{Source covariance matrix on the same variables, ordering,
-scale, and covariance normalization as the target covariance.}
+\item{source}{Either an object returned by [source_moments_method()] or a
+source covariance matrix.}
 
-\item{center}{If `TRUE`, subtract target sample column means. This is useful
-in practice but turns the exact known-mean URE into a plug-in rule. The
-default is `TRUE`.}
+\item{center}{If `TRUE`, subtract target sample column means.}
 }
 \value{
-An object of class `cov_tl`, represented by a list with the pooled
-  `covariance`, analytic `lambda` and `alpha`, target covariance, target
-  variance estimate, observed source-target squared distance, and URE
-  quadratic coefficients.
+An object of class `cov_tl` with the pooled covariance, selected
+  weight, source and target noise estimates, and mismatch diagnostics.
 }
 \description{
-Pool a target sample covariance with a source covariance using the closed-form
-unbiased-risk-estimation (URE) weight. The source and target samples need not
-overlap, and source individual-level data are not required.
-}
-\details{
-The estimator is
-\deqn{\widehat\Sigma=(1-\widehat\lambda)S_1+
-\widehat\lambda S_0,}
-where
-\deqn{\widehat\lambda=\left[\widehat V_1 /
-\|S_0-S_1\|_F^2\right]_{[0,1]}.}
-Here `S1 = crossprod(X_target) / n` and `V1` is the matrix sample-variance
-estimator. Thus no cross-validation or tuning grid is used.
-Large matrix products and covariance construction use `CppMatrix` routines,
-with base R retained only as a fallback and for unsupported scalar
-reductions.
+Pool a target sample covariance with a source covariance using a closed-form
+URE weight. With a `ld_source_moments` object, source sampling noise is
+included through
+\deqn{\widehat\lambda = \widehat V_1 /
+\max\{\widehat V_1 + \widehat V_0,
+       \|S_0-S_1\|_F^2\}.}
+If `source` is only a covariance matrix, source fourth-moment information is
+unavailable and the summary-only denominator \eqn{\|S_0-S_1\|_F^2} is used.
 }

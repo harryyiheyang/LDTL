@@ -4,26 +4,45 @@
 \alias{poet_linear_shrinkage}
 \title{POET with linear shrinkage of the idiosyncratic covariance}
 \usage{
-poet_linear_shrinkage(S = NULL, n = NULL, alpha = 0.5, X = NULL, scale = FALSE)
+poet_linear_shrinkage(
+  S = NULL,
+  n = NULL,
+  alpha = 0.05,
+  X = NULL,
+  scale = FALSE,
+  factor_method = c("ACT", "D.ratio"),
+  eig = NULL
+)
 }
 \arguments{
 \item{S}{Optional symmetric covariance or correlation matrix.}
 
 \item{n}{Sample size used to form `S`.}
 
-\item{alpha}{Shrinkage intensity in `[0, 1]` toward the diagonal of the
-idiosyncratic covariance. Default is 0.5.}
+\item{alpha}{Boundary in `[0, 1]` for the MSE plug-in shrinkage intensity.
+The applied intensity is the smaller of the MSE rule and `alpha`. Default
+is 0.05.}
 
 \item{X}{Optional individual-level data matrix. Used to compute `S` when
 `S` is not supplied and to infer `n`.}
 
 \item{scale}{If `TRUE`, center and standardize `X` before computing `S`.
 Default is `FALSE`, assuming `X` has already been scaled.}
+
+\item{factor_method}{Method used to select the number of POET factors.
+`"ACT"` uses adjusted correlation thresholding and is the default;
+`"D.ratio"` uses the eigenvalue difference-ratio rule. The lower bound is
+5 and the upper bound is the rank reaching 90 percent cumulative
+eigenvalue mass.}
+
+\item{eig}{Optional full eigendecomposition of `S`, supplied as a list with
+`values` and `vectors`. If `NULL`, it is computed internally.}
 }
 \value{
 A positive-semidefinite POET regularized correlation matrix.
 }
 \description{
 Estimate a factor component from the leading eigenpairs of `S` and shrink the
-idiosyncratic covariance toward its diagonal.
+idiosyncratic covariance toward its diagonal. The selected spike eigenvalues
+receive the S-POET positive-part bias correction.
 }

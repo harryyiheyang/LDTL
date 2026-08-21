@@ -97,29 +97,26 @@ source_moments_method <- function(
   )
 }
 
-#' Finite-source stabilized covariance transfer learning
+#' Tuning-free covariance transfer learning
 #'
-#' This is the stabilized finite-source method, kept separate from [cov_tl()].
-#' With a `ld_source_moments` object, it estimates the nonnegative covariance
-#' mismatch and uses
+#' Pool a target sample covariance with a source covariance using a closed-form
+#' URE weight. With a `ld_source_moments` object, source sampling noise is
+#' included through
 #' \deqn{\widehat\lambda = \widehat V_1 /
 #' \max\{\widehat V_1 + \widehat V_0,
 #'        \|S_0-S_1\|_F^2\}.}
 #' If `source` is only a covariance matrix, source fourth-moment information is
-#' unavailable and this function explicitly reports and uses the summary-only
-#' URE denominator \eqn{\|S_0-S_1\|_F^2}. The legacy [cov_tl()] entry point and
-#' behavior remain unchanged.
+#' unavailable and the summary-only denominator \eqn{\|S_0-S_1\|_F^2} is used.
 #'
 #' @param X_target Target individual-level matrix with observations in rows.
 #' @param source Either an object returned by [source_moments_method()] or a
 #'   source covariance matrix.
 #' @param center If `TRUE`, subtract target sample column means.
 #'
-#' @return An object of class `cov_tl_stabilized` with the pooled covariance,
-#'   selected weight, source and target noise estimates, and mismatch
-#'   diagnostics.
+#' @return An object of class `cov_tl` with the pooled covariance, selected
+#'   weight, source and target noise estimates, and mismatch diagnostics.
 #' @export
-cov_tl_stabilized <- function(X_target, source, center = TRUE) {
+cov_tl <- function(X_target, source, center = TRUE) {
   target <- .ld_tl_target_moments(X_target, center = center)
   resolved <- .ld_tl_resolve_source(source, ncol(target$X))
   S_source <- resolved$covariance
@@ -133,7 +130,7 @@ cov_tl_stabilized <- function(X_target, source, center = TRUE) {
     denominator <- max(noise_floor, distance_squared)
     mismatch_squared_raw <- distance_squared - noise_floor
     mismatch_squared <- max(mismatch_squared_raw, 0)
-    weight_method <- "finite_source_stabilized"
+    weight_method <- "finite_source"
   } else {
     noise_floor <- NA_real_
     denominator <- distance_squared
@@ -169,14 +166,15 @@ cov_tl_stabilized <- function(X_target, source, center = TRUE) {
       n_source = resolved$n,
       center = isTRUE(center),
       source_moments_supplied = resolved$has_variance,
+      exact_known_mean_ure = !isTRUE(center),
       exact_known_mean_moments =
         !isTRUE(center) && isTRUE(resolved$exact_known_mean_moments)
     ),
-    class = "cov_tl_stabilized"
+    class = "cov_tl"
   )
 }
 
-#' Tuning-free covariance transfer learning
+#' Legacy summary-only covariance transfer learning
 #'
 #' Pool a target sample covariance with a source covariance using the closed-form
 #' unbiased-risk-estimation (URE) weight. The source and target samples need not
@@ -203,12 +201,12 @@ cov_tl_stabilized <- function(X_target, source, center = TRUE) {
 #'   in practice but turns the exact known-mean URE into a plug-in rule. The
 #'   default is `TRUE`.
 #'
-#' @return An object of class `cov_tl`, represented by a list with the pooled
+#' @return An object of class `cov_tl1`, represented by a list with the pooled
 #'   `covariance`, analytic `lambda` and `alpha`, target covariance, target
 #'   variance estimate, observed source-target squared distance, and URE
 #'   quadratic coefficients.
-#' @export
-cov_tl <- function(X_target, S_source, center = TRUE) {
+#' @keywords internal
+cov_tl1 <- function(X_target, S_source, center = TRUE) {
   target <- .ld_tl_target_moments(X_target, center = center)
   S_source <- .ld_tl_source_covariance(S_source, ncol(target$X))
 
@@ -244,11 +242,11 @@ cov_tl <- function(X_target, S_source, center = TRUE) {
       center = isTRUE(center),
       exact_known_mean_ure = !isTRUE(center)
     ),
-    class = "cov_tl"
+    class = "cov_tl1"
   )
 }
 
-#' Tuning-free eigenspace transfer learning
+#' Legacy summary-only eigenspace transfer learning
 #'
 #' Choose the source pooling rate by minimizing the first-order target
 #' eigenspace (spectral-projector tangent) risk. The analytic rule is
@@ -283,11 +281,11 @@ cov_tl <- function(X_target, S_source, center = TRUE) {
 #'   eigengap is treated as unidentified. By default a scale-adjusted numerical
 #'   tolerance is used.
 #'
-#' @return An object of class `eigspac_tl`, represented by a list containing the
+#' @return An object of class `eigspac_tl1`, represented by a list containing the
 #'   pooled covariance, its leading eigenvectors and projector, analytic
 #'   `lambda` and `alpha`, tangent-risk quantities, and pilot eigengap.
-#' @export
-eigspac_tl <- function(
+#' @keywords internal
+eigspac_tl1 <- function(
     X_target,
     S_source,
     rank,
@@ -318,15 +316,15 @@ eigspac_tl <- function(
         quadratic = components$tangent_distance_squared
       )
     ),
-    class_name = "eigspac_tl"
+    class_name = "eigspac_tl1"
   )
 }
 
-#' Finite-source stabilized eigenspace transfer learning
+#' Tuning-free eigenspace transfer learning
 #'
-#' A separate finite-source analogue of [eigspac_tl()]. It stabilizes the
-#' tangent-risk denominator by adding a source tangent-noise term before
-#' truncating the estimated tangent mismatch at zero.
+#' Choose the source pooling rate by minimizing the first-order target
+#' eigenspace risk. When source noise information is available, the denominator
+#' includes a source tangent-noise term before truncating the mismatch at zero.
 #'
 #' A reusable scalar covariance fourth moment does not identify the exact
 #' source tangent variance for an arbitrary target eigenspace. When
@@ -334,11 +332,13 @@ eigspac_tl <- function(
 #' explicit conservative plug-in bound
 #' \deqn{\widehat T_0^{bound}=\widehat V_0/\widehat\gamma^2,}
 #' where `gamma` is the pilot eigengap. An exact target-specific source tangent
-#' estimate may instead be supplied by the caller. The function reports which
-#' form was used and never silently substitutes this rule into [eigspac_tl()].
+#' estimate may instead be supplied by the caller. With a covariance-matrix
+#' source and no supplied tangent variance, the summary-only tangent URE rule is
+#' used.
 #'
 #' @param X_target Target individual-level data matrix.
-#' @param source An `ld_source_moments` object from [source_moments_method()].
+#' @param source An `ld_source_moments` object from [source_moments_method()] or
+#'   a source covariance matrix.
 #' @param rank Number of leading target eigenvectors.
 #' @param center Whether to center target columns.
 #' @param S_pilot Optional independent covariance used for the projector
@@ -348,9 +348,9 @@ eigspac_tl <- function(
 #'   of source tangent noise. If omitted, the Frobenius-noise/eigengap bound is
 #'   used.
 #'
-#' @return An object of class `eigspac_tl_stabilized`.
+#' @return An object of class `eigspac_tl`.
 #' @export
-eigspac_tl_stabilized <- function(
+eigspac_tl <- function(
     X_target,
     source,
     rank,
@@ -359,12 +359,6 @@ eigspac_tl_stabilized <- function(
     eigengap_tol = NULL,
     source_tangent_variance = NULL
 ) {
-  if (!inherits(source, "ld_source_moments")) {
-    stop(
-      "eigspac_tl_stabilized requires an ld_source_moments object; use eigspac_tl for a covariance-only source summary.",
-      call. = FALSE
-    )
-  }
   resolved <- .ld_tl_resolve_source(source, ncol(X_target))
   components <- .ld_tl_eigenspace_components(
     X_target = X_target,
@@ -375,11 +369,11 @@ eigspac_tl_stabilized <- function(
     eigengap_tol = eigengap_tol
   )
 
-  if (is.null(source_tangent_variance)) {
+  if (is.null(source_tangent_variance) && resolved$has_variance) {
     source_tangent_variance <-
       resolved$variance / components$pilot_eigengap^2
     source_tangent_variance_type <- "frobenius_eigengap_upper_proxy"
-  } else {
+  } else if (!is.null(source_tangent_variance)) {
     if (length(source_tangent_variance) != 1L ||
         !is.finite(source_tangent_variance) ||
         source_tangent_variance < 0) {
@@ -389,6 +383,27 @@ eigspac_tl_stabilized <- function(
       )
     }
     source_tangent_variance_type <- "target_specific_supplied"
+  } else {
+    weight <- .ld_tl_closed_form_weight(
+      numerator = components$tangent_variance,
+      denominator = components$tangent_distance_squared
+    )
+    return(.ld_tl_eigenspace_result(
+      components,
+      weight,
+      extra = list(
+        weight_method = "summary_only_tangent_ure",
+        source_variance = NA_real_,
+        source_tangent_variance = NA_real_,
+        source_tangent_variance_type = "unavailable",
+        tangent_noise_floor = NA_real_,
+        tangent_mismatch_squared_raw = NA_real_,
+        tangent_mismatch_squared = NA_real_,
+        denominator = components$tangent_distance_squared,
+        n_source = NA_real_
+      ),
+      class_name = "eigspac_tl"
+    ))
   }
 
   noise_floor <- components$tangent_variance + source_tangent_variance
@@ -404,7 +419,7 @@ eigspac_tl_stabilized <- function(
     components,
     weight,
     extra = list(
-      weight_method = "finite_source_tangent_stabilized",
+      weight_method = "finite_source_tangent",
       source_variance = resolved$variance,
       source_tangent_variance = source_tangent_variance,
       source_tangent_variance_type = source_tangent_variance_type,
@@ -414,7 +429,7 @@ eigspac_tl_stabilized <- function(
       denominator = denominator,
       n_source = resolved$n
     ),
-    class_name = "eigspac_tl_stabilized"
+    class_name = "eigspac_tl"
   )
 }
 

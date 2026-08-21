@@ -191,7 +191,7 @@ test_that("source moment blocks support integer data, centering, and cached S0",
   expect_false(computed$exact_known_mean_moments)
 })
 
-test_that("stabilized CovTL is separate from legacy CovTL", {
+test_that("cov_tl selects its finite-source branch from the source input", {
   X_target <- cbind(
     c(2, -2, 1, -1),
     c(1, 1, -1, -1)
@@ -215,29 +215,29 @@ test_that("stabilized CovTL is separate from legacy CovTL", {
     distance
   )
 
-  stabilized <- cov_tl_stabilized(
+  finite_source <- cov_tl(
     X_target,
     source_fit,
     center = FALSE
   )
-  summary_only <- cov_tl_stabilized(
+  summary_only <- cov_tl(
     X_target,
     source_fit$covariance,
     center = FALSE
   )
-  legacy <- cov_tl(
+  legacy <- LDRegularization:::cov_tl1(
     X_target,
     source_fit$covariance,
     center = FALSE
   )
 
-  expect_s3_class(stabilized, "cov_tl_stabilized")
-  expect_identical(stabilized$weight_method, "finite_source_stabilized")
-  expect_equal(stabilized$denominator, expected_denominator)
-  expect_equal(stabilized$lambda, target$variance / expected_denominator)
+  expect_s3_class(finite_source, "cov_tl")
+  expect_identical(finite_source$weight_method, "finite_source")
+  expect_equal(finite_source$denominator, expected_denominator)
+  expect_equal(finite_source$lambda, target$variance / expected_denominator)
   expect_identical(summary_only$weight_method, "summary_only_ure")
   expect_equal(summary_only$lambda, legacy$lambda)
-  expect_false(inherits(legacy, "cov_tl_stabilized"))
+  expect_s3_class(legacy, "cov_tl1")
 })
 
 test_that("source moment inputs reject missing and incompatible data", {
@@ -250,7 +250,7 @@ test_that("source moment inputs reject missing and incompatible data", {
   )
 })
 
-test_that("stabilized EigenTL uses explicit source-noise information", {
+test_that("eigspac_tl selects its finite-source branch from the source input", {
   X_target <- cbind(
     c(2, -2, 1, -1),
     c(1, 1, -1, -1)
@@ -264,13 +264,13 @@ test_that("stabilized EigenTL uses explicit source-noise information", {
     center = FALSE,
     block_size = 2
   )
-  legacy <- eigspac_tl(
+  legacy <- LDRegularization:::eigspac_tl1(
     X_target,
     source_fit$covariance,
     rank = 1,
     center = FALSE
   )
-  stabilized <- eigspac_tl_stabilized(
+  finite_source <- eigspac_tl(
     X_target,
     source_fit,
     rank = 1,
@@ -283,19 +283,19 @@ test_that("stabilized EigenTL uses explicit source-noise information", {
     legacy$tangent_distance_squared
   )
 
-  expect_s3_class(stabilized, "eigspac_tl_stabilized")
+  expect_s3_class(finite_source, "eigspac_tl")
   expect_identical(
-    stabilized$source_tangent_variance_type,
+    finite_source$source_tangent_variance_type,
     "frobenius_eigengap_upper_proxy"
   )
-  expect_equal(stabilized$source_tangent_variance, expected_source_tangent)
-  expect_equal(stabilized$denominator, expected_denominator)
+  expect_equal(finite_source$source_tangent_variance, expected_source_tangent)
+  expect_equal(finite_source$denominator, expected_denominator)
   expect_equal(
-    stabilized$lambda,
+    finite_source$lambda,
     legacy$tangent_variance / expected_denominator
   )
 
-  supplied <- eigspac_tl_stabilized(
+  supplied <- eigspac_tl(
     X_target,
     source_fit,
     rank = 1,
@@ -307,14 +307,24 @@ test_that("stabilized EigenTL uses explicit source-noise information", {
     "target_specific_supplied"
   )
   expect_equal(supplied$source_tangent_variance, 0.125)
-  expect_error(
-    eigspac_tl_stabilized(
-      X_target,
-      source_fit$covariance,
-      rank = 1
-    ),
-    "requires an ld_source_moments"
+  summary_only <- eigspac_tl(
+    X_target,
+    source_fit$covariance,
+    rank = 1,
+    center = FALSE
   )
+  expect_identical(summary_only$weight_method, "summary_only_tangent_ure")
+  expect_equal(summary_only$lambda, legacy$lambda)
+  expect_s3_class(legacy, "eigspac_tl1")
+})
+
+test_that("legacy and stabilized transfer names are not exported", {
+  exports <- getNamespaceExports("LDRegularization")
+
+  expect_false("cov_tl1" %in% exports)
+  expect_false("eigspac_tl1" %in% exports)
+  expect_false("cov_tl_stabilized" %in% exports)
+  expect_false("eigspac_tl_stabilized" %in% exports)
 })
 
 test_that("Teacher-B max-score path uses fold-adjusted effective source sizes", {

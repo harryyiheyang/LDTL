@@ -338,20 +338,164 @@
   out
 }
 
-.ld_fix_residual_diag <- function(x) {
+.ld_fix_residual_diag <- function(x, fallback_diag = NULL) {
   x <- .ld_symmetrize(x)
   d <- diag(x)
-  pos_min <- suppressWarnings(min(d[d > 0]))
-  if (is.finite(pos_min)) {
-    d[d < 0] <- pos_min
+  positive <- d[is.finite(d) & d > 0]
+  if (length(positive)) {
+    replacement <- min(positive)
   } else {
-    d[d < 0] <- 0
+    fallback_diag <- as.numeric(fallback_diag)
+    fallback_positive <- fallback_diag[is.finite(fallback_diag) & fallback_diag > 0]
+    if (!length(fallback_positive)) {
+      stop(
+        "Residual diagonal has no positive value and no positive fallback.",
+        call. = FALSE
+      )
+    }
+    replacement <- min(fallback_positive)
   }
+  d[!is.finite(d) | d <= 0] <- replacement
   diag(x) <- d
   x
 }
 
-.ld_factor_count_from_values <- function(d, k_min, k_max, cutoff_method = "D.ratio") {
+.ld_resolve_poet_eigen <- function(S, eig = NULL) {
+  if (is.null(eig)) {
+    return(.ld_eigen(S))
+  }
+  if (!is.list(eig) || is.null(eig$values) || is.null(eig$vectors)) {
+    stop("eig must be a list with values and vectors.", call. = FALSE)
+  }
+
+  p <- nrow(S)
+  values <- as.numeric(eig$values)
+  vectors <- as.matrix(eig$vectors)
+  storage.mode(vectors) <- "double"
+  if (length(values) != p || !all(dim(vectors) == c(p, p))) {
+    stop(
+      "eig must contain p eigenvalues and a p by p eigenvector matrix.",
+      call. = FALSE
+    )
+  }
+  if (any(!is.finite(values)) || any(!is.finite(vectors))) {
+    stop("eig values and vectors must be finite.", call. = FALSE)
+  }
+
+  ord <- order(values, decreasing = TRUE)
+  list(
+    values = values[ord],
+    vectors = vectors[, ord, drop = FALSE]
+  )
+}
+
+.ld_mse_shrinkage_intensity <- function(E, n, target = NULL) {
+  E <- .ld_as_square_matrix(E, "E")
+  n <- .ld_validate_n(n)
+  p <- nrow(E)
+  d <- diag(E)
+  off_squared <- sum(E^2) - sum(d^2)
+  if (is.null(target)) {
+    distance_squared <- off_squared
+  } else {
+    target <- .ld_as_square_matrix(target, "target")
+    if (!all(dim(target) == c(p, p))) {
+      stop("target must have the same dimensions as E.", call. = FALSE)
+    }
+    distance_squared <- 0
+    for (i in seq_len(p)) {
+      delta <- E[i, ] - target[i, ]
+      delta[i] <- 0
+      distance_squared <- distance_squared + sum(delta^2)
+    }
+  }
+
+  if (!is.finite(distance_squared) || distance_squared <= 0) {
+    return(0)
+  }
+
+  diagonal_products <- sum(d)^2 - sum(d^2)
+  variance <- (off_squared + diagonal_products) / (n - 1)
+  min(max(variance / distance_squared, 0), 1)
+}
+
+.ld_poet_spike_correction <- function(d, factors, n, trace_S) {
+  p <- length(d)
+  n <- .ld_validate_n(n)
+  factors <- as.integer(factors)
+  leading <- seq_len(factors)
+  denom <- p - factors - factors * p / n
+
+  if (!is.finite(denom) || denom <= 0) {
+    stop(
+      "S-POET spike correction requires p - K - K * p / n > 0.",
+      call. = FALSE
+    )
+  }
+  c_hat <- (trace_S - sum(d[leading])) / denom
+  c_hat <- max(c_hat, 0)
+  bias <- c_hat * p / n
+
+  list(
+    values = pmax(d[leading] - bias, 0),
+    c_hat = c_hat,
+    bias = bias,
+    denominator = denom
+  )
+}
+
+.ld_act_adjusted_eigenvalues <- function(d, n, k_max) {
+  p <- length(d)
+  n <- .ld_validate_n(n)
+  k_max <- min(as.integer(k_max), p - 1L)
+  adjusted <- rep(NA_real_, p)
+
+  if (k_max < 1L) {
+    return(adjusted)
+  }
+
+  for (j in seq_len(k_max)) {
+    z <- d[j]
+    tail <- d[seq.int(j + 1L, p)]
+    pseudo <- (3 * z + d[j + 1L]) / 4
+    den <- c(tail - z, pseudo - z)
+    if (!is.finite(z) || z == 0 || any(!is.finite(den)) || any(den == 0)) {
+      next
+    }
+
+    m <- sum(1 / den) / (p - j)
+    rho <- (p - j) / (n - 1)
+    m_bar <- -(1 - rho) / z + rho * m
+    if (is.finite(m_bar) && m_bar != 0) {
+      adjusted[j] <- -1 / m_bar
+    }
+  }
+
+  adjusted
+}
+
+.ld_poet_factor_max <- function(d, k_min, fraction = 0.9) {
+  if (length(fraction) != 1L || !is.finite(fraction) || fraction <= 0 || fraction >= 1) {
+    stop("fraction must be a finite scalar strictly between 0 and 1.", call. = FALSE)
+  }
+
+  mass <- pmax(as.numeric(d), 0)
+  total <- sum(mass)
+  if (!is.finite(total) || total <= 0) {
+    stop("POET eigenvalues must have positive finite total mass.", call. = FALSE)
+  }
+
+  rank_fraction <- which(cumsum(mass) / total >= fraction)[1L]
+  max(as.integer(k_min), as.integer(rank_fraction))
+}
+
+.ld_factor_count_from_values <- function(
+    d,
+    k_min,
+    k_max,
+    cutoff_method = c("ACT", "D.ratio", "ratio"),
+    n = NULL
+) {
   p <- length(d)
   if (p <= 2L) {
     return(1L)
@@ -361,6 +505,15 @@
   k_max <- min(as.integer(k_max), p - 2L)
   if (k_min > k_max) {
     return(min(max(1L, k_max), p - 1L))
+  }
+
+  cutoff_method <- match.arg(cutoff_method)
+  if (identical(cutoff_method, "ACT")) {
+    adjusted <- .ld_act_adjusted_eigenvalues(d, n, k_max)
+    threshold <- 1 + sqrt(p / (.ld_validate_n(n) - 1))
+    selected <- which(adjusted[seq_len(k_max)] > threshold)
+    pck <- if (length(selected)) max(selected) else k_min
+    return(min(max(pck, k_min), k_max))
   }
 
   z <- rep(NA_real_, p)
@@ -389,32 +542,50 @@
   min(max(pck, 1L), p - 1L)
 }
 
-.ld_poet_components <- function(S, n, cutoff_method, k_min, k_max) {
+.ld_poet_components <- function(S, n, cutoff_method, k_min, k_max, eig = NULL) {
   S <- .ld_as_square_matrix(S, "S")
   p <- nrow(S)
   S[is.na(S)] <- 0
   diag(S) <- 1
-  S[abs(S) < 1e-4] <- 0
   S <- .ld_symmetrize(S)
 
-  eig <- .ld_eigen(S)
+  eig <- .ld_resolve_poet_eigen(S, eig)
   d <- eig$values
   U <- eig$vectors
 
-  pck <- .ld_factor_count_from_values(d, k_min, k_max, cutoff_method)
+  if (is.null(k_max)) {
+    k_max <- .ld_poet_factor_max(d, k_min, fraction = 0.9)
+  }
+
+  pck <- .ld_factor_count_from_values(
+    d,
+    k_min,
+    k_max,
+    cutoff_method,
+    n = n
+  )
 
   Uk <- U[, seq_len(pck), drop = FALSE]
-  dk <- d[seq_len(pck)]
-  denom <- p - pck - pck * p / n
-  hatc <- if (is.finite(denom) && denom > 0) {
-    (sum(diag(S)) - sum(dk)) / denom
-  } else {
-    0
-  }
-  dk <- pmax(.ld_mcp(dk, hatc * p / n, a = 3), 0)
+  spike <- .ld_poet_spike_correction(
+    d,
+    factors = pck,
+    n = n,
+    trace_S = sum(diag(S))
+  )
+  dk <- spike$values
   P <- tcrossprod(t(t(Uk) * dk), Uk)
   P <- .ld_symmetrize(P)
-  E <- .ld_fix_residual_diag(S - P)
+  E <- .ld_fix_residual_diag(S - P, fallback_diag = diag(S))
 
-  list(S = S, P = P, E = E, U = Uk, factors = pck, eigenvalues = d)
+  list(
+    S = S,
+    P = P,
+    E = E,
+    U = Uk,
+    factors = pck,
+    eigenvalues = d,
+    corrected_eigenvalues = dk,
+    spike_c_hat = spike$c_hat,
+    spike_bias = spike$bias
+  )
 }

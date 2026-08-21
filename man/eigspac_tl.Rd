@@ -6,56 +6,49 @@
 \usage{
 eigspac_tl(
   X_target,
-  S_source,
+  source,
   rank,
   center = TRUE,
   S_pilot = NULL,
-  eigengap_tol = NULL
+  eigengap_tol = NULL,
+  source_tangent_variance = NULL
 )
 }
 \arguments{
-\item{X_target}{Target individual-level data matrix, with observations in
-rows. For the fixed-derivative URE identity, its rows should be independent
-and centered at the known population mean.}
+\item{X_target}{Target individual-level data matrix.}
 
-\item{S_source}{Source covariance matrix on the same variables, ordering,
-scale, and covariance normalization as the target covariance.}
+\item{source}{An `ld_source_moments` object from [source_moments_method()] or
+a source covariance matrix.}
 
-\item{rank}{Number of leading target eigenvectors to estimate. Must be
-between 1 and `ncol(X_target) - 1`.}
+\item{rank}{Number of leading target eigenvectors.}
 
-\item{center}{If `TRUE`, subtract target sample column means. This gives a
-practical plug-in rule rather than the exact known-mean identity. The
-default is `TRUE`.}
+\item{center}{Whether to center target columns.}
 
-\item{S_pilot}{Optional covariance matrix used only to estimate the
-spectral-projector derivative. It should be independent of `X_target` for
-the conditional unbiased-risk interpretation.}
+\item{S_pilot}{Optional independent covariance used for the projector
+derivative.}
 
-\item{eigengap_tol}{Optional positive tolerance below which the pilot
-eigengap is treated as unidentified. By default a scale-adjusted numerical
-tolerance is used.}
+\item{eigengap_tol}{Optional positive eigengap tolerance.}
+
+\item{source_tangent_variance}{Optional nonnegative target-specific estimate
+of source tangent noise. If omitted, the Frobenius-noise/eigengap bound is
+used.}
 }
 \value{
-An object of class `eigspac_tl`, represented by a list containing the
-  pooled covariance, its leading eigenvectors and projector, analytic
-  `lambda` and `alpha`, tangent-risk quantities, and pilot eigengap.
+An object of class `eigspac_tl`.
 }
 \description{
 Choose the source pooling rate by minimizing the first-order target
-eigenspace (spectral-projector tangent) risk. The analytic rule is
-\deqn{\widehat\lambda_{ES}=\left[\widehat T_1 /
-\widehat Q_{ES}\right]_{[0,1]},}
-where `T1` is the target tangent-noise estimate and `Q_ES` is the observed
-source-target distance after applying the target spectral-projector
-derivative. The final eigenspace is computed from the pooled covariance.
+eigenspace risk. When source noise information is available, the denominator
+includes a source tangent-noise term before truncating the mismatch at zero.
 }
 \details{
-If `S_pilot` is supplied from data independent of `X_target`, the empirical
-tangent-risk quadratic is conditionally unbiased for that fixed derivative.
-If it is omitted, the target sample eigensystem is reused, giving the usual
-full-sample first-order plug-in estimator. Neither version uses
-cross-validation or a tuning grid.
-The covariance, score, cross-block, projector, and eigendecomposition
-computations use `CppMatrix` routines whenever available.
+A reusable scalar covariance fourth moment does not identify the exact
+source tangent variance for an arbitrary target eigenspace. When
+`source_tangent_variance` is omitted, this function therefore uses the
+explicit conservative plug-in bound
+\deqn{\widehat T_0^{bound}=\widehat V_0/\widehat\gamma^2,}
+where `gamma` is the pilot eigengap. An exact target-specific source tangent
+estimate may instead be supplied by the caller. With a covariance-matrix
+source and no supplied tangent variance, the summary-only tangent URE rule is
+used.
 }

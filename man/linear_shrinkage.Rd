@@ -10,7 +10,8 @@ linear_shrinkage(
   alpha = 0.05,
   target = NULL,
   lambda = NULL,
-  scale = FALSE
+  scale = FALSE,
+  n = NULL
 )
 }
 \arguments{
@@ -19,7 +20,9 @@ linear_shrinkage(
 \item{X}{Optional individual-level data matrix. Used to compute `S` when
 `S` is not supplied.}
 
-\item{alpha}{Shrinkage intensity in `[0, 1]`. Default is 0.05.}
+\item{alpha}{Boundary in `[0, 1]` for the MSE plug-in shrinkage intensity.
+The applied intensity is the smaller of the MSE rule and `alpha`. Default
+is 0.05.}
 
 \item{target}{Optional shrinkage target. Defaults to the identity matrix.}
 
@@ -28,12 +31,15 @@ compatibility.}
 
 \item{scale}{If `TRUE`, center and standardize `X` before computing `S`.
 Default is `FALSE`, assuming `X` has already been scaled.}
+
+\item{n}{Sample size used to form `S`. Inferred from `X`; required when only
+`S` is supplied.}
 }
 \value{
 A positive-semidefinite regularized correlation matrix after
   shrinkage.
 }
 \description{
-Shrink a sample correlation matrix toward a target matrix. The default
-shrinkage intensity is intentionally small and tuning-free.
+Shrink a sample correlation matrix toward a target matrix. The shrinkage
+intensity follows a Gaussian/Wishart MSE plug-in rule capped by `alpha`.
 }

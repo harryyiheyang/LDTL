@@ -52,7 +52,7 @@ source_moments_raw <- function(
     block_size = as.integer(block_size),
     n_threads = as.integer(n_threads)
   )
-  covariance <- .ld_symmetrize(native$covariance)
+  covariance <- native$covariance
   variance_raw <- native$variance_raw
 
   structure(

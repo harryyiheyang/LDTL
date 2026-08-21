@@ -62,6 +62,22 @@ test_that("source_moments_raw matches the in-memory source moments", {
   expect_equal(streamed$passes, 2)
   expect_lt(streamed$working_bytes, 1000)
 
+  cached <- source_moments_raw(
+    file,
+    S_source = direct$covariance,
+    block_size = 2L,
+    n_threads = 1L
+  )
+  expect_false(cached$covariance_computed)
+  expect_equal(cached$covariance, direct$covariance, tolerance = 1e-14)
+  expect_equal(cached$fourth_sum, direct$fourth_sum, tolerance = 1e-12)
+  expect_equal(cached$variance, direct$variance, tolerance = 1e-12)
+  expect_lt(cached$working_bytes, streamed$working_bytes)
+  expect_error(
+    source_moments_raw(file, S_source = diag(2)),
+    "same number of variables"
+  )
+
   target <- matrix(rnorm(24), 8, 3)
   fit <- cov_tl(X_target = target, source = streamed, center = TRUE)
   expect_true(all(is.finite(fit$covariance)))

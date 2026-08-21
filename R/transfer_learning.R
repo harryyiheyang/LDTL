@@ -1,10 +1,12 @@
 #' Compute source moments directly from a PLINK additive raw file
 #'
 #' Read a PLINK 2 `--export A` file in C++ blocks without materializing the
-#' individual-by-variant matrix in R. The file is scanned twice. The first pass
-#' estimates variant means and root-mean-square scales after mean imputation;
-#' the second pass accumulates the standardized covariance with BLAS and the
-#' scalar fourth-moment sum needed by finite-source transfer learning.
+#' individual-by-variant matrix in R. The first pass estimates variant means
+#' and root-mean-square scales after mean imputation; the second pass computes
+#' the scalar fourth-moment sum needed by finite-source transfer learning.
+#' When `S_source` is omitted, the second pass also accumulates the standardized
+#' covariance with BLAS. When `S_source` is supplied, it is reused and the
+#' additional scan remains \eqn{O(n_0p)}.
 #'
 #' Missing dosages encoded as `NA` or `.` are imputed to their variant mean.
 #' Standardized second moments use normalization `1/n`, so the returned
@@ -12,6 +14,8 @@
 #'
 #' @param raw_file Path to a PLINK 2 additive raw file produced by
 #'   `--export A`.
+#' @param S_source Optional precomputed source correlation matrix formed from
+#'   the same individuals, variants, allele coding, and independent scaling.
 #' @param block_size Number of samples parsed per C++/BLAS block. The default
 #'   uses about `2048 * p * 8` bytes for the genotype block.
 #' @param n_threads Number of OpenMP threads used by supported preprocessing
@@ -26,6 +30,7 @@
 #' @export
 source_moments_raw <- function(
     raw_file,
+    S_source = NULL,
     block_size = 2048L,
     n_threads = 0L
 ) {
@@ -47,13 +52,23 @@ source_moments_raw <- function(
     stop("n_threads must be zero or a positive integer.", call. = FALSE)
   }
 
+  compute_covariance <- is.null(S_source)
   native <- cpp_source_moments_raw(
     raw_file,
     block_size = as.integer(block_size),
-    n_threads = as.integer(n_threads)
+    n_threads = as.integer(n_threads),
+    compute_covariance = compute_covariance
   )
-  covariance <- native$covariance
-  variance_raw <- native$variance_raw
+  if (compute_covariance) {
+    covariance <- native$covariance
+    variance_raw <- native$variance_raw
+  } else {
+    covariance <- .ld_tl_source_covariance(S_source, native$p)
+    n_double <- as.double(native$n)
+    variance_raw <-
+      (native$fourth_sum - n_double * sum(covariance^2)) /
+      (n_double * (n_double - 1))
+  }
 
   structure(
     list(
@@ -77,7 +92,7 @@ source_moments_raw <- function(
       block_size = native$block_size,
       threads_used = native$threads_used,
       working_bytes = native$working_bytes,
-      covariance_computed = TRUE
+      covariance_computed = compute_covariance
     ),
     class = "ld_source_moments"
   )

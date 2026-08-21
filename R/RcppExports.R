@@ -5,6 +5,6 @@ cpp_source_moments <- function(X_source, center, block_size, n_threads, compute_
     .Call(`_LDRegularization_cpp_source_moments`, X_source, center, block_size, n_threads, compute_covariance)
 }
 
-cpp_source_moments_raw <- function(raw_file, block_size, n_threads) {
-    .Call(`_LDRegularization_cpp_source_moments_raw`, raw_file, block_size, n_threads)
+cpp_source_moments_raw <- function(raw_file, block_size, n_threads, compute_covariance) {
+    .Call(`_LDRegularization_cpp_source_moments_raw`, raw_file, block_size, n_threads, compute_covariance)
 }

@@ -203,7 +203,8 @@ void open_raw(
 List cpp_source_moments_raw(
     const std::string raw_file,
     const int block_size,
-    const int n_threads
+    const int n_threads,
+    const bool compute_covariance
 ) {
   if (block_size < 1) {
     stop("block_size must be a positive integer.");
@@ -296,7 +297,10 @@ List cpp_source_moments_raw(
     stop("PLINK raw header changed between file passes.");
   }
 
-  NumericMatrix covariance(p, p);
+  NumericMatrix covariance;
+  if (compute_covariance) {
+    covariance = NumericMatrix(p, p);
+  }
   long double fourth_sum = 0.0L;
   long double missing_second = 0.0L;
   long double n_second = 0.0L;
@@ -328,26 +332,28 @@ List cpp_source_moments_raw(
       fourth_sum += row_norm_squared[i] * row_norm_squared[i];
     }
 
-    const char upper = 'U';
-    const char transpose = 'T';
-    const int p_blas = p;
-    const int rows_blas = rows;
-    const int leading_block = block_size;
-    const int leading_covariance = p;
-    const double alpha = 1.0;
-    const double beta = 1.0;
-    F77_CALL(dsyrk)(
-      &upper,
-      &transpose,
-      &p_blas,
-      &rows_blas,
-      &alpha,
-      block.data(),
-      &leading_block,
-      &beta,
-      covariance.begin(),
-      &leading_covariance FCONE FCONE
-    );
+    if (compute_covariance) {
+      const char upper = 'U';
+      const char transpose = 'T';
+      const int p_blas = p;
+      const int rows_blas = rows;
+      const int leading_block = block_size;
+      const int leading_covariance = p;
+      const double alpha = 1.0;
+      const double beta = 1.0;
+      F77_CALL(dsyrk)(
+        &upper,
+        &transpose,
+        &p_blas,
+        &rows_blas,
+        &alpha,
+        block.data(),
+        &leading_block,
+        &beta,
+        covariance.begin(),
+        &leading_covariance FCONE FCONE
+      );
+    }
 
     n_second += static_cast<long double>(rows);
     checkUserInterrupt();
@@ -358,29 +364,35 @@ List cpp_source_moments_raw(
     stop("PLINK raw file changed between file passes.");
   }
 
-  long double frobenius_squared = 0.0L;
-  for (int j = 0; j < p; ++j) {
-    for (int k = j; k < p; ++k) {
-      const double value = covariance[j + p * k] /
-        static_cast<double>(n_long);
-      covariance[j + p * k] = value;
-      covariance[k + p * j] = value;
-      const long double square =
-        static_cast<long double>(value) * static_cast<long double>(value);
-      frobenius_squared += (j == k) ? square : 2.0L * square;
+  double variance_raw = NA_REAL;
+  if (compute_covariance) {
+    long double frobenius_squared = 0.0L;
+    for (int j = 0; j < p; ++j) {
+      for (int k = j; k < p; ++k) {
+        const double value = covariance[j + p * k] /
+          static_cast<double>(n_long);
+        covariance[j + p * k] = value;
+        covariance[k + p * j] = value;
+        const long double square =
+          static_cast<long double>(value) * static_cast<long double>(value);
+        frobenius_squared += (j == k) ? square : 2.0L * square;
+      }
     }
+    variance_raw = static_cast<double>(
+      (fourth_sum - n_long * frobenius_squared) /
+      (n_long * (n_long - 1.0L))
+    );
   }
-  const long double variance_raw =
-    (fourth_sum - n_long * frobenius_squared) /
-    (n_long * (n_long - 1.0L));
   const double working_bytes =
     static_cast<double>(block_size) * static_cast<double>(p) * sizeof(double) +
-    static_cast<double>(p) * static_cast<double>(p) * sizeof(double) +
+    (compute_covariance ?
+      static_cast<double>(p) * static_cast<double>(p) * sizeof(double) : 0.0) +
     static_cast<double>(block_size) * sizeof(long double);
 
   return List::create(
-    _["covariance"] = covariance,
-    _["variance_raw"] = static_cast<double>(variance_raw),
+    _["covariance"] = compute_covariance ?
+      static_cast<SEXP>(covariance) : R_NilValue,
+    _["variance_raw"] = variance_raw,
     _["fourth_sum"] = static_cast<double>(fourth_sum),
     _["n"] = static_cast<double>(n_long),
     _["p"] = p,

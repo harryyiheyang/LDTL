@@ -4,11 +4,19 @@
 \alias{source_moments_raw}
 \title{Compute source moments directly from a PLINK additive raw file}
 \usage{
-source_moments_raw(raw_file, block_size = 2048L, n_threads = 0L)
+source_moments_raw(
+  raw_file,
+  S_source = NULL,
+  block_size = 2048L,
+  n_threads = 0L
+)
 }
 \arguments{
 \item{raw_file}{Path to a PLINK 2 additive raw file produced by
 `--export A`.}
+
+\item{S_source}{Optional precomputed source correlation matrix formed from
+the same individuals, variants, allele coding, and independent scaling.}
 
 \item{block_size}{Number of samples parsed per C++/BLAS block. The default
 uses about `2048 * p * 8` bytes for the genotype block.}
@@ -26,10 +34,12 @@ An object of class `ld_source_moments`, with the same covariance,
 }
 \description{
 Read a PLINK 2 `--export A` file in C++ blocks without materializing the
-individual-by-variant matrix in R. The file is scanned twice. The first pass
-estimates variant means and root-mean-square scales after mean imputation;
-the second pass accumulates the standardized covariance with BLAS and the
-scalar fourth-moment sum needed by finite-source transfer learning.
+individual-by-variant matrix in R. The first pass estimates variant means
+and root-mean-square scales after mean imputation; the second pass computes
+the scalar fourth-moment sum needed by finite-source transfer learning.
+When `S_source` is omitted, the second pass also accumulates the standardized
+covariance with BLAS. When `S_source` is supplied, it is reused and the
+additional scan remains \eqn{O(n_0p)}.
 }
 \details{
 Missing dosages encoded as `NA` or `.` are imputed to their variant mean.

@@ -77,6 +77,34 @@ test_that("POET reuses a supplied full eigendecomposition", {
   )
 })
 
+test_that("POET accepts a fixed common factor rank", {
+  set.seed(18)
+  X <- matrix(stats::rnorm(6000), nrow = 300, ncol = 20)
+  S <- stats::cor(X)
+  eig <- LDRegularization:::.ld_eigen(S)
+  comp <- LDRegularization:::.ld_poet_components(
+    S,
+    n = 300,
+    cutoff_method = "ACT",
+    k_min = 5,
+    k_max = NULL,
+    eig = eig,
+    factors = 7
+  )
+
+  expect_equal(comp$factors, 7L)
+  expect_equal(
+    poet_thresholding(S = S, n = 300, eig = eig, factors = 7),
+    poet_thresholding(S = S, n = 300, eig = eig, factors = 7,
+                      factor_method = "D.ratio"),
+    tolerance = 1e-12
+  )
+  expect_error(
+    poet_thresholding(S = S, n = 300, factors = 20),
+    "between 1 and nrow"
+  )
+})
+
 test_that("POET linear shrinkage uses the MSE plug-in intensity", {
   E <- matrix(
     c(

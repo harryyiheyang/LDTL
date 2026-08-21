@@ -542,7 +542,15 @@
   min(max(pck, 1L), p - 1L)
 }
 
-.ld_poet_components <- function(S, n, cutoff_method, k_min, k_max, eig = NULL) {
+.ld_poet_components <- function(
+    S,
+    n,
+    cutoff_method,
+    k_min,
+    k_max,
+    eig = NULL,
+    factors = NULL
+) {
   S <- .ld_as_square_matrix(S, "S")
   p <- nrow(S)
   S[is.na(S)] <- 0
@@ -553,17 +561,24 @@
   d <- eig$values
   U <- eig$vectors
 
-  if (is.null(k_max)) {
-    k_max <- .ld_poet_factor_max(d, k_min, fraction = 0.9)
+  if (is.null(factors)) {
+    if (is.null(k_max)) {
+      k_max <- .ld_poet_factor_max(d, k_min, fraction = 0.9)
+    }
+    pck <- .ld_factor_count_from_values(
+      d,
+      k_min,
+      k_max,
+      cutoff_method,
+      n = n
+    )
+  } else {
+    if (length(factors) != 1L || !is.finite(factors) ||
+        factors != round(factors) || factors < 1L || factors >= p) {
+      stop("factors must be an integer between 1 and nrow(S) - 1.", call. = FALSE)
+    }
+    pck <- as.integer(factors)
   }
-
-  pck <- .ld_factor_count_from_values(
-    d,
-    k_min,
-    k_max,
-    cutoff_method,
-    n = n
-  )
 
   Uk <- U[, seq_len(pck), drop = FALSE]
   spike <- .ld_poet_spike_correction(

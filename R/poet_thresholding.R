@@ -20,6 +20,8 @@
 #'   `"D.ratio"` uses the eigenvalue difference-ratio rule. The lower bound is
 #'   5 and the upper bound is the rank reaching 90 percent cumulative
 #'   eigenvalue mass.
+#' @param factors Optional fixed number of POET factors. When supplied, it
+#'   overrides `factor_method`.
 #' @param eig Optional full eigendecomposition of `S`, supplied as a list with
 #'   `values` and `vectors`. If `NULL`, it is computed internally.
 #'
@@ -34,7 +36,8 @@ poet_thresholding <- function(
     X = NULL,
     scale = FALSE,
     factor_method = c("ACT", "D.ratio"),
-    eig = NULL
+    eig = NULL,
+    factors = NULL
 ) {
   factor_method <- match.arg(factor_method)
   input <- .ld_resolve_input(S = S, X = X, n = n, name = "S", scale = scale)
@@ -47,7 +50,8 @@ poet_thresholding <- function(
     cutoff_method = factor_method,
     k_min = 5,
     k_max = NULL,
-    eig = eig
+    eig = eig,
+    factors = factors
   )
   resolved_lambda <- .ld_resolve_poet_threshold(
     nrow(comp$E),

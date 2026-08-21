@@ -13,7 +13,8 @@ poet_banding(
   X = NULL,
   scale = FALSE,
   factor_method = c("ACT", "D.ratio"),
-  eig = NULL
+  eig = NULL,
+  factors = NULL
 )
 }
 \arguments{
@@ -43,6 +44,9 @@ eigenvalue mass.}
 
 \item{eig}{Optional full eigendecomposition of `S`, supplied as a list with
 `values` and `vectors`. If `NULL`, it is computed internally.}
+
+\item{factors}{Optional fixed number of POET factors. When supplied, it
+overrides `factor_method`.}
 }
 \value{
 A positive-semidefinite POET regularized correlation matrix. Set

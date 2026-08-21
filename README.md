@@ -42,9 +42,22 @@ The package currently includes the following main functions:
   source pooling rate from the closed-form covariance URE criterion, without
   cross-validation or a tuning grid.
 
+- source_moments_method: C++/OpenMP individual-block preprocessing of a source
+  cohort. It returns a reusable source covariance and scalar fourth-moment
+  noise estimate without retaining the source individuals.
+
+- cov_tl_stabilized: Finite-source stabilized covariance transfer learning.
+  This is a separate estimator from `cov_tl`; it uses source fourth-moment
+  information when an `ld_source_moments` object is supplied.
+
 - eigspac_tl: Tuning-free eigenspace transfer learning. It estimates the optimal
   first-order pooling rate in spectral-projector tangent geometry and returns
   the pooled leading eigenspace.
+
+- eigspac_tl_stabilized: A separate finite-source eigenspace rule. Because a
+  scalar source fourth moment does not identify arbitrary target-direction
+  tangent noise, it either uses a supplied target-specific tangent variance or
+  an explicitly labelled Frobenius/eigengap upper proxy.
 
 Most matrix estimators accept either a precomputed matrix (`S` or `A`) or
 individual-level data `X`. Nonlinear shrinkage requires `X`. The POET functions
@@ -105,6 +118,106 @@ derivative. Without it, the function uses the full-sample first-order plug-in
 rule. If the mean must be estimated from `X_target`, use `center = TRUE`; the
 resulting weight is then a practical plug-in rule. Neither function performs
 CV or grid search.
+
+When source individual-level data are available, preprocess them once and
+reuse the resulting summary across target fits:
+
+```r
+source_fit <- source_moments_method(
+  X_source,
+  center = FALSE,
+  block_size = NULL,  # automatic 512 MiB working-set target
+  n_threads = 20
+)
+
+cov_stable <- cov_tl_stabilized(
+  X_target,
+  source_fit,
+  center = FALSE
+)
+
+eig_stable <- eigspac_tl_stabilized(
+  X_target,
+  source_fit,
+  rank = 3,
+  center = FALSE
+)
+```
+
+`source_moments_method()` processes individuals in native blocks and never
+forms individual outer products. If a matching `S_source` is already
+available, pass it to the moment function; the additional source scan then
+computes only `sum_i ||X_source[i, ]||^4`, reducing the extra work to
+`O(n_source * p)`. Missing genotypes should be mean-imputed before the scan.
+The covariance output is still `p` by `p`, so variant/LD-region blocking is a
+separate requirement when `p` itself is too large.
+
+The legacy and finite-source estimators deliberately have different entry
+points. Calling `cov_tl()` or `eigspac_tl()` never silently activates a
+stabilized weight.
+
+Teacher B's path-adaptive framework is exposed through two more independent
+entry points. Both interpret each grid value as an effective fraction of the
+available source sample, adjust its weight separately inside every target
+fold, and refit the selected fraction on all target observations:
+
+```r
+fold_id <- sample(rep(1:5, length.out = nrow(X_target)))
+
+path_max <- path_tpca_max_score(
+  X_target,
+  source_fit,       # or S_source together with n_source
+  rank = 3,
+  fold_id = fold_id
+)
+
+path_one_se <- path_tpca_one_se(
+  X_target,
+  source_fit,
+  rank = 3,
+  fold_id = fold_id
+)
+```
+
+`path_tpca_max_score()` selects the raw held-out target-score maximizer.
+`path_tpca_one_se()` instead selects the largest source fraction whose paired
+per-individual score deficit is within one standard error of that maximizer.
+These two path estimators use the source covariance and sample size, but not
+the fourth moment. Thus the package now keeps six public estimators separate:
+legacy CovTL and EigenTL, their finite-source fourth-moment variants, and the
+two Teacher-B covariance-path refits.
+
+Choose a common target subspace dimension before comparing the eigenspace and
+path estimators. `select_tl_rank_bootstrap()` treats cumulative variance as an
+operational compression goal rather than a finite-spike rank. It fixes a core
+below a 50-percent anchor, leaves a guard band flexible, and uses individual
+bootstrap samples only in a randomized projected score space:
+
+```r
+rank_fit <- select_tl_rank_bootstrap(
+  X_target,
+  target_fraction_grid = c(.5, .6, .7, .8, .9),
+  selection_fraction = .8,
+  anchor_fraction = .5,
+  guard_fraction = .05,
+  n_boot = 100,
+  n_threads = 20
+)
+
+K <- rank_fit$rank
+rank_fit$rank_path
+
+eig_fit <- eigspac_tl(X_target, S_source, rank = K)
+path_fit <- path_tpca_one_se(X_target, source_fit, rank = K)
+```
+
+The 0.8 target is user-defined; the out-of-bag bootstrap lower quantile is the
+data-driven quantity. Flexible directions are fitted on in-bag individuals and
+their captured variance is evaluated out of bag. Stability is audited at the
+smallest rank reaching each target but does not push the rank upward, because
+normalized projector loss can decrease mechanically near the full flexible
+space. No source data, bootstrap `p` by `p` covariance, or repeated full
+eigendecomposition is used by this selector.
 
 Both transfer-learning functions prioritize `CppMatrix` for covariance
 construction, matrix products, centering, projector construction, and spectral

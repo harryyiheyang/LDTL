@@ -1,3 +1,88 @@
+#' Compute source moments directly from a PLINK additive raw file
+#'
+#' Read a PLINK 2 `--export A` file in C++ blocks without materializing the
+#' individual-by-variant matrix in R. The file is scanned twice. The first pass
+#' estimates variant means and root-mean-square scales after mean imputation;
+#' the second pass accumulates the standardized covariance with BLAS and the
+#' scalar fourth-moment sum needed by finite-source transfer learning.
+#'
+#' Missing dosages encoded as `NA` or `.` are imputed to their variant mean.
+#' Standardized second moments use normalization `1/n`, so the returned
+#' covariance has unit diagonal up to numerical precision.
+#'
+#' @param raw_file Path to a PLINK 2 additive raw file produced by
+#'   `--export A`.
+#' @param block_size Number of samples parsed per C++/BLAS block. The default
+#'   uses about `2048 * p * 8` bytes for the genotype block.
+#' @param n_threads Number of OpenMP threads used by supported preprocessing
+#'   steps. Zero uses the C++ runtime default. BLAS threading is controlled by
+#'   the linked BLAS implementation.
+#'
+#' @return An object of class `ld_source_moments`, with the same covariance,
+#'   variance, fourth-moment, sample-size, and dimension fields consumed by
+#'   [cov_tl()], [eigspac_tl()], [path_tpca_max_score()], and
+#'   [path_tpca_one_se()]. File-scan diagnostics, variant IDs, means, scales,
+#'   missing counts, and estimated C++ working bytes are also returned.
+#' @export
+source_moments_raw <- function(
+    raw_file,
+    block_size = 2048L,
+    n_threads = 0L
+) {
+  if (!is.character(raw_file) || length(raw_file) != 1L ||
+      is.na(raw_file) || !nzchar(raw_file)) {
+    stop("raw_file must be one nonempty file path.", call. = FALSE)
+  }
+  raw_file <- normalizePath(
+    path.expand(raw_file),
+    winslash = "/",
+    mustWork = TRUE
+  )
+  if (length(block_size) != 1L || !is.finite(block_size) ||
+      block_size < 1 || block_size != round(block_size)) {
+    stop("block_size must be a positive integer.", call. = FALSE)
+  }
+  if (length(n_threads) != 1L || !is.finite(n_threads) ||
+      n_threads < 0 || n_threads != round(n_threads)) {
+    stop("n_threads must be zero or a positive integer.", call. = FALSE)
+  }
+
+  native <- cpp_source_moments_raw(
+    raw_file,
+    block_size = as.integer(block_size),
+    n_threads = as.integer(n_threads)
+  )
+  covariance <- .ld_symmetrize(native$covariance)
+  variance_raw <- native$variance_raw
+
+  structure(
+    list(
+      covariance = covariance,
+      variance = max(variance_raw, 0),
+      variance_raw = variance_raw,
+      fourth_sum = native$fourth_sum,
+      n = native$n,
+      p = native$p,
+      mean = native$mean,
+      scale = native$scale,
+      observed = native$observed,
+      missing_calls = native$missing_calls,
+      variants = native$variants,
+      center = TRUE,
+      scale_genotypes = TRUE,
+      exact_known_mean_moments = FALSE,
+      normalization = "1/n",
+      source_format = "PLINK2 --export A",
+      passes = native$passes,
+      block_size = native$block_size,
+      threads_used = native$threads_used,
+      working_bytes = native$working_bytes,
+      covariance_computed = TRUE
+    ),
+    class = "ld_source_moments"
+  )
+}
+
 #' Compute reusable source covariance and fourth-moment summaries
 #'
 #' Scan source individuals in C++ blocks and return the source empirical second

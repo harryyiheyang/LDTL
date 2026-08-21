@@ -26,9 +26,23 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_source_moments_raw
+List cpp_source_moments_raw(const std::string raw_file, const int block_size, const int n_threads);
+RcppExport SEXP _LDRegularization_cpp_source_moments_raw(SEXP raw_fileSEXP, SEXP block_sizeSEXP, SEXP n_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const std::string >::type raw_file(raw_fileSEXP);
+    Rcpp::traits::input_parameter< const int >::type block_size(block_sizeSEXP);
+    Rcpp::traits::input_parameter< const int >::type n_threads(n_threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_source_moments_raw(raw_file, block_size, n_threads));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_LDRegularization_cpp_source_moments", (DL_FUNC) &_LDRegularization_cpp_source_moments, 5},
+    {"_LDRegularization_cpp_source_moments_raw", (DL_FUNC) &_LDRegularization_cpp_source_moments_raw, 3},
     {NULL, NULL, 0}
 };
 

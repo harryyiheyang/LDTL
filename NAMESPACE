@@ -2,11 +2,10 @@
 
 export(banding)
 export(cov_tl)
-export(eigspac_tl)
+export(eigen_tl)
 export(linear_shrinkage)
+export(multi_source_tl)
 export(nonlinear_shrinkage)
-export(path_tpca_max_score)
-export(path_tpca_one_se)
 export(poet_banding)
 export(poet_linear_shrinkage)
 export(poet_nonlinear_shrinkage)

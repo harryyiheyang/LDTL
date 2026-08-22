@@ -28,8 +28,8 @@ the linked BLAS implementation.}
 \value{
 An object of class `ld_source_moments`, with the same covariance,
   variance, fourth-moment, sample-size, and dimension fields consumed by
-  [cov_tl()], [eigspac_tl()], [path_tpca_max_score()], and
-  [path_tpca_one_se()]. File-scan diagnostics, variant IDs, means, scales,
+  [cov_tl()] and [eigen_tl()]. File-scan diagnostics, variant IDs, means,
+  scales,
   missing counts, and estimated C++ working bytes are also returned.
 }
 \description{

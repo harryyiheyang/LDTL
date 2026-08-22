@@ -24,8 +24,8 @@
 #'
 #' @return An object of class `ld_source_moments`, with the same covariance,
 #'   variance, fourth-moment, sample-size, and dimension fields consumed by
-#'   [cov_tl()], [eigspac_tl()], [path_tpca_max_score()], and
-#'   [path_tpca_one_se()]. File-scan diagnostics, variant IDs, means, scales,
+#'   [cov_tl()] and [eigen_tl()]. File-scan diagnostics, variant IDs, means,
+#'   scales,
 #'   missing counts, and estimated C++ working bytes are also returned.
 #' @export
 source_moments_raw <- function(
@@ -346,327 +346,17 @@ cov_tl1 <- function(X_target, S_source, center = TRUE) {
   )
 }
 
-#' Legacy summary-only eigenspace transfer learning
+#' Fold-adjusted covariance-path eigenspace transfer learning
 #'
-#' Choose the source pooling rate by minimizing the first-order target
-#' eigenspace (spectral-projector tangent) risk. The analytic rule is
-#' \deqn{\widehat\lambda_{ES}=\left[\widehat T_1 /
-#' \widehat Q_{ES}\right]_{[0,1]},}
-#' where `T1` is the target tangent-noise estimate and `Q_ES` is the observed
-#' source-target distance after applying the target spectral-projector
-#' derivative. The final eigenspace is computed from the pooled covariance.
+#' Fit the source-transfer path proposed by Teacher B. Each grid point is an
+#' effective fraction of the available source sample. Its covariance pooling
+#' weight is recomputed for every target training fold, and the selected path
+#' point is refitted using all target observations.
 #'
-#' If `S_pilot` is supplied from data independent of `X_target`, the empirical
-#' tangent-risk quadratic is conditionally unbiased for that fixed derivative.
-#' If it is omitted, the target sample eigensystem is reused, giving the usual
-#' full-sample first-order plug-in estimator. Neither version uses
-#' cross-validation or a tuning grid.
-#' The covariance, score, cross-block, projector, and eigendecomposition
-#' computations use `CppMatrix` routines whenever available.
-#'
-#' @param X_target Target individual-level data matrix, with observations in
-#'   rows. For the fixed-derivative URE identity, its rows should be independent
-#'   and centered at the known population mean.
-#' @param S_source Source covariance matrix on the same variables, ordering,
-#'   scale, and covariance normalization as the target covariance.
-#' @param rank Number of leading target eigenvectors to estimate. Must be
-#'   between 1 and `ncol(X_target) - 1`.
-#' @param center If `TRUE`, subtract target sample column means. This gives a
-#'   practical plug-in rule rather than the exact known-mean identity. The
-#'   default is `TRUE`.
-#' @param S_pilot Optional covariance matrix used only to estimate the
-#'   spectral-projector derivative. It should be independent of `X_target` for
-#'   the conditional unbiased-risk interpretation.
-#' @param eigengap_tol Optional positive tolerance below which the pilot
-#'   eigengap is treated as unidentified. By default a scale-adjusted numerical
-#'   tolerance is used.
-#'
-#' @return An object of class `eigspac_tl1`, represented by a list containing the
-#'   pooled covariance, its leading eigenvectors and projector, analytic
-#'   `lambda` and `alpha`, tangent-risk quantities, and pilot eigengap.
-#' @keywords internal
-eigspac_tl1 <- function(
-    X_target,
-    S_source,
-    rank,
-    center = TRUE,
-    S_pilot = NULL,
-    eigengap_tol = NULL
-) {
-  components <- .ld_tl_eigenspace_components(
-    X_target = X_target,
-    S_source = S_source,
-    rank = rank,
-    center = center,
-    S_pilot = S_pilot,
-    eigengap_tol = eigengap_tol
-  )
-  weight <- .ld_tl_closed_form_weight(
-    numerator = components$tangent_variance,
-    denominator = components$tangent_distance_squared
-  )
-  .ld_tl_eigenspace_result(
-    components,
-    weight,
-    extra = list(
-      weight_method = "tangent_ure",
-      tangent_ure = c(
-        constant = components$tangent_variance,
-        linear = -2 * components$tangent_variance,
-        quadratic = components$tangent_distance_squared
-      )
-    ),
-    class_name = "eigspac_tl1"
-  )
-}
-
-#' Tuning-free eigenspace transfer learning
-#'
-#' Choose the source pooling rate by minimizing the first-order target
-#' eigenspace risk. When source noise information is available, the denominator
-#' includes a source tangent-noise term before truncating the mismatch at zero.
-#'
-#' A reusable scalar covariance fourth moment does not identify the exact
-#' source tangent variance for an arbitrary target eigenspace. When
-#' `source_tangent_variance` is omitted, this function therefore uses the
-#' explicit conservative plug-in bound
-#' \deqn{\widehat T_0^{bound}=\widehat V_0/\widehat\gamma^2,}
-#' where `gamma` is the pilot eigengap. An exact target-specific source tangent
-#' estimate may instead be supplied by the caller. With a covariance-matrix
-#' source and no supplied tangent variance, the summary-only tangent URE rule is
-#' used.
-#'
-#' @param X_target Target individual-level data matrix.
-#' @param source An `ld_source_moments` object from [source_moments_method()] or
-#'   a source covariance matrix.
-#' @param rank Number of leading target eigenvectors.
-#' @param center Whether to center target columns.
-#' @param S_pilot Optional independent covariance used for the projector
-#'   derivative.
-#' @param eigengap_tol Optional positive eigengap tolerance.
-#' @param source_tangent_variance Optional nonnegative target-specific estimate
-#'   of source tangent noise. If omitted, the Frobenius-noise/eigengap bound is
-#'   used.
-#'
-#' @return An object of class `eigspac_tl`.
-#' @export
-eigspac_tl <- function(
-    X_target,
-    source,
-    rank,
-    center = TRUE,
-    S_pilot = NULL,
-    eigengap_tol = NULL,
-    source_tangent_variance = NULL
-) {
-  resolved <- .ld_tl_resolve_source(source, ncol(X_target))
-  components <- .ld_tl_eigenspace_components(
-    X_target = X_target,
-    S_source = resolved$covariance,
-    rank = rank,
-    center = center,
-    S_pilot = S_pilot,
-    eigengap_tol = eigengap_tol
-  )
-
-  if (is.null(source_tangent_variance) && resolved$has_variance) {
-    source_tangent_variance <-
-      resolved$variance / components$pilot_eigengap^2
-    source_tangent_variance_type <- "frobenius_eigengap_upper_proxy"
-  } else if (!is.null(source_tangent_variance)) {
-    if (length(source_tangent_variance) != 1L ||
-        !is.finite(source_tangent_variance) ||
-        source_tangent_variance < 0) {
-      stop(
-        "source_tangent_variance must be a nonnegative finite scalar.",
-        call. = FALSE
-      )
-    }
-    source_tangent_variance_type <- "target_specific_supplied"
-  } else {
-    weight <- .ld_tl_closed_form_weight(
-      numerator = components$tangent_variance,
-      denominator = components$tangent_distance_squared
-    )
-    return(.ld_tl_eigenspace_result(
-      components,
-      weight,
-      extra = list(
-        weight_method = "summary_only_tangent_ure",
-        source_variance = NA_real_,
-        source_tangent_variance = NA_real_,
-        source_tangent_variance_type = "unavailable",
-        tangent_noise_floor = NA_real_,
-        tangent_mismatch_squared_raw = NA_real_,
-        tangent_mismatch_squared = NA_real_,
-        denominator = components$tangent_distance_squared,
-        n_source = NA_real_
-      ),
-      class_name = "eigspac_tl"
-    ))
-  }
-
-  noise_floor <- components$tangent_variance + source_tangent_variance
-  denominator <- max(noise_floor, components$tangent_distance_squared)
-  mismatch_squared_raw <- components$tangent_distance_squared - noise_floor
-  mismatch_squared <- max(mismatch_squared_raw, 0)
-  weight <- .ld_tl_closed_form_weight(
-    numerator = components$tangent_variance,
-    denominator = denominator
-  )
-
-  .ld_tl_eigenspace_result(
-    components,
-    weight,
-    extra = list(
-      weight_method = "finite_source_tangent",
-      source_variance = resolved$variance,
-      source_tangent_variance = source_tangent_variance,
-      source_tangent_variance_type = source_tangent_variance_type,
-      tangent_noise_floor = noise_floor,
-      tangent_mismatch_squared_raw = mismatch_squared_raw,
-      tangent_mismatch_squared = mismatch_squared,
-      denominator = denominator,
-      n_source = resolved$n
-    ),
-    class_name = "eigspac_tl"
-  )
-}
-
-.ld_tl_eigenspace_components <- function(
-    X_target,
-    S_source,
-    rank,
-    center,
-    S_pilot,
-    eigengap_tol
-) {
-  target <- .ld_tl_target_moments(X_target, center = center)
-  p <- ncol(target$X)
-  S_source <- .ld_tl_source_covariance(S_source, p)
-  rank <- .ld_tl_rank(rank, p)
-
-  if (is.null(S_pilot)) {
-    S_derivative <- target$covariance
-    pilot_independent <- FALSE
-  } else {
-    S_derivative <- .ld_tl_source_covariance(S_pilot, p, "S_pilot")
-    pilot_independent <- TRUE
-  }
-  pilot_eig <- .ld_eigen(S_derivative)
-  scale <- max(1, abs(pilot_eig$values))
-  if (is.null(eigengap_tol)) {
-    eigengap_tol <- sqrt(.Machine$double.eps) * scale
-  }
-  if (length(eigengap_tol) != 1L || !is.finite(eigengap_tol) ||
-      eigengap_tol <= 0) {
-    stop("eigengap_tol must be a positive finite scalar.", call. = FALSE)
-  }
-  eigengap <- pilot_eig$values[rank] - pilot_eig$values[rank + 1L]
-  if (!is.finite(eigengap) || eigengap <= eigengap_tol) {
-    stop(
-      "The pilot eigengap at rank is too small for the tangent-risk rule.",
-      call. = FALSE
-    )
-  }
-
-  leading <- seq_len(rank)
-  trailing <- seq.int(rank + 1L, p)
-  U_leading <- pilot_eig$vectors[, leading, drop = FALSE]
-  U_trailing <- pilot_eig$vectors[, trailing, drop = FALSE]
-  gaps <- outer(
-    pilot_eig$values[leading],
-    pilot_eig$values[trailing],
-    "-"
-  )
-  scores_leading <- .ld_matrix_multiply(target$X, U_leading)
-  scores_trailing <- .ld_matrix_multiply(target$X, U_trailing)
-  target_cross_block <- .ld_matrix_multiply(
-    scores_leading,
-    scores_trailing,
-    transA = TRUE
-  ) / target$n
-  cross_score_squares <- .ld_matrix_multiply(
-    scores_leading^2,
-    scores_trailing^2,
-    transA = TRUE
-  )
-  centered_cross_squares <-
-    cross_score_squares - target$n * target_cross_block^2
-  centered_cross_squares <- pmax(centered_cross_squares, 0)
-  tangent_sum <- sum(centered_cross_squares / gaps^2)
-  tangent_variance <- 2 * tangent_sum / (target$n * (target$n - 1L))
-  tangent_variance <- max(tangent_variance, 0)
-
-  source_trailing <- .ld_matrix_multiply(S_source, U_trailing)
-  source_cross_block <- .ld_matrix_multiply(
-    U_leading,
-    source_trailing,
-    transA = TRUE
-  )
-  delta_cross_block <- source_cross_block - target_cross_block
-  tangent_distance_squared <- 2 * sum((delta_cross_block / gaps)^2)
-
-  list(
-    target = target,
-    source_covariance = S_source,
-    rank = rank,
-    leading = leading,
-    tangent_variance = tangent_variance,
-    tangent_distance_squared = tangent_distance_squared,
-    pilot_covariance = S_derivative,
-    pilot_eigengap = eigengap,
-    pilot_supplied = pilot_independent,
-    center = isTRUE(center)
-  )
-}
-
-.ld_tl_eigenspace_result <- function(
-    components,
-    weight,
-    extra,
-    class_name
-) {
-  pooled <- .ld_symmetrize(
-    (1 - weight$lambda) * components$target$covariance +
-      weight$lambda * components$source_covariance
-  )
-  pooled_eig <- .ld_eigen(pooled)
-  vectors <- pooled_eig$vectors[, components$leading, drop = FALSE]
-  projector <- .ld_matrix_multiply(vectors, vectors, transB = TRUE)
-  common <- list(
-    covariance = pooled,
-    vectors = vectors,
-    projector = .ld_symmetrize(projector),
-    eigenvalues = pooled_eig$values[components$leading],
-    rank = components$rank,
-    lambda = weight$lambda,
-    alpha = weight$alpha,
-    target_covariance = components$target$covariance,
-    source_covariance = components$source_covariance,
-    tangent_variance = components$tangent_variance,
-    tangent_distance_squared = components$tangent_distance_squared,
-    pilot_covariance = components$pilot_covariance,
-    pilot_eigengap = components$pilot_eigengap,
-    pilot_supplied = components$pilot_supplied,
-    n_target = components$target$n,
-    center = components$center,
-    conditional_ure_if_pilot_independent =
-      components$pilot_supplied && !components$center
-  )
-  structure(c(common, extra), class = class_name)
-}
-
-#' Max-score fold-adjusted covariance-path transfer PCA
-#'
-#' Teacher-B covariance-path estimator using ordinary target cross-validation.
-#' A grid point is an effective fraction of the available source sample, so the
-#' final grid point is exact sample-size pooling in every training fold. The
-#' empirical target-score maximizer is then refitted on all observations.
-#'
-#' This is a separate estimator from the analytic CovTL and EigenTL families.
-#' It does not use source fourth moments, although an `ld_source_moments` object
-#' may be supplied as a convenient source covariance/sample-size container.
+#' `method = "one_se"` returns the most transferred candidate whose paired
+#' held-out target-score deficit is within one standard error of the empirical
+#' winner. `method = "min"` returns the candidate with minimum held-out
+#' reconstruction risk, equivalently maximum captured target score.
 #'
 #' @param X_target Target individual-level data matrix.
 #' @param source An `ld_source_moments` object or a source covariance matrix.
@@ -677,59 +367,20 @@ eigspac_tl <- function(
 #' @param source_fraction_grid Increasing effective-source fractions in
 #'   `[0, 1]`, including zero and one.
 #' @param center If `TRUE`, center each training and validation fold at the
-#'   corresponding training-fold target mean. The exact known-mean theory uses
-#'   `center = FALSE`.
-#' @param fold_id Optional integer fold labels. Supplying these is the preferred
-#'   way to make comparisons exactly reproducible. Otherwise balanced labels
-#'   are randomly permuted using R's current RNG state.
+#'   corresponding training-fold target mean.
+#' @param fold_id Optional fold labels. Supply a shared vector when comparing
+#'   sources so all source candidates use identical target folds.
+#' @param method Path selector. The default paired one-standard-error rule
+#'   favors more transfer among competitive candidates; `"min"` selects the
+#'   minimum reconstruction-risk candidate.
+#' @param standard_error_multiplier Nonnegative multiplier for `method =
+#'   "one_se"`. The default is one.
 #'
-#' @return An object of class `path_tpca_max_score` containing the selected
-#'   full-data covariance/projector, complete fold scores, path weights, and
-#'   fold assignment.
+#' @return An object of class `eigen_tl` containing the selected full-data
+#'   covariance, eigenspace, complete held-out path scores, paired uncertainty,
+#'   and source-transfer diagnostics.
 #' @export
-path_tpca_max_score <- function(
-    X_target,
-    source,
-    rank,
-    n_source = NULL,
-    folds = 5L,
-    source_fraction_grid = c(
-      0, .05, .10, .20, .35, .50, .65, .80, .90, .95, 1
-    ),
-    center = TRUE,
-    fold_id = NULL
-) {
-  .ld_path_tpca_fit(
-    X_target = X_target,
-    source = source,
-    rank = rank,
-    n_source = n_source,
-    folds = folds,
-    source_fraction_grid = source_fraction_grid,
-    center = center,
-    fold_id = fold_id,
-    selector = "max_score",
-    standard_error_multiplier = 0
-  )
-}
-
-#' Paired one-standard-error fold-adjusted covariance-path transfer PCA
-#'
-#' Teacher-B path-adaptive estimator. It builds the same fold-adjusted path as
-#' [path_tpca_max_score()], but returns the most transferred candidate whose
-#' paired held-out target-score deficit is within one estimated standard error
-#' of the empirical winner. The selected effective source fraction is then
-#' refitted using all target observations and the source covariance.
-#'
-#' @inheritParams path_tpca_max_score
-#' @param standard_error_multiplier Nonnegative multiplier on the paired
-#'   standard error. The proposed default is one.
-#'
-#' @return An object of class `path_tpca_one_se` containing the selected
-#'   full-data covariance/projector, paired competitive set, fold scores, and
-#'   refit diagnostics.
-#' @export
-path_tpca_one_se <- function(
+eigen_tl <- function(
     X_target,
     source,
     rank,
@@ -740,9 +391,11 @@ path_tpca_one_se <- function(
     ),
     center = TRUE,
     fold_id = NULL,
+    method = c("one_se", "min"),
     standard_error_multiplier = 1
 ) {
-  .ld_path_tpca_fit(
+  method <- match.arg(method)
+  .ld_eigen_tl_fit(
     X_target = X_target,
     source = source,
     rank = rank,
@@ -751,12 +404,12 @@ path_tpca_one_se <- function(
     source_fraction_grid = source_fraction_grid,
     center = center,
     fold_id = fold_id,
-    selector = "paired_one_se",
+    selector = method,
     standard_error_multiplier = standard_error_multiplier
   )
 }
 
-.ld_path_tpca_fit <- function(
+.ld_eigen_tl_fit <- function(
     X_target,
     source,
     rank,
@@ -847,7 +500,7 @@ path_tpca_one_se <- function(
   ) / sqrt(n_target)
   paired_standard_errors[best_index] <- 0
 
-  if (selector == "max_score") {
+  if (selector == "min") {
     selected_index <- best_index
     competitive <- seq_along(zeta) == best_index
   } else {
@@ -886,11 +539,9 @@ path_tpca_one_se <- function(
   projector <- .ld_symmetrize(
     .ld_matrix_multiply(vectors, vectors, transB = TRUE)
   )
-  class_name <- if (selector == "max_score") {
-    "path_tpca_max_score"
-  } else {
-    "path_tpca_one_se"
-  }
+  selected_score <- mean_scores[selected_index]
+  target_score <- mean_scores[1L]
+  reconstruction_gain <- selected_score - target_score
 
   structure(
     list(
@@ -899,14 +550,18 @@ path_tpca_one_se <- function(
       projector = projector,
       eigenvalues = fit_eig$values[seq_len(rank)],
       rank = rank,
-      selector = selector,
+      method = selector,
       selected_index = selected_index,
       selected_zeta = zeta[selected_index],
       selected_weight = selected_weight,
       pooled_endpoint_selected = selected_index == length(zeta),
-      max_score_index = best_index,
-      max_score_zeta = zeta[best_index],
-      max_score_weight = full_weights[best_index],
+      best_index = best_index,
+      best_zeta = zeta[best_index],
+      best_weight = full_weights[best_index],
+      selected_score = selected_score,
+      target_score = target_score,
+      reconstruction_gain = reconstruction_gain,
+      positive_reconstruction_gain = max(reconstruction_gain, 0),
       source_fraction_grid = zeta,
       full_data_weights = full_weights,
       fold_weights = fold_weights,
@@ -922,7 +577,7 @@ path_tpca_one_se <- function(
       n_target = n_target,
       n_source = n_source,
       center = isTRUE(center),
-      standard_error_multiplier = if (selector == "max_score") {
+      standard_error_multiplier = if (selector == "min") {
         NA_real_
       } else {
         standard_error_multiplier
@@ -930,8 +585,248 @@ path_tpca_one_se <- function(
       exact_fold_pooling_endpoint = TRUE,
       source_fourth_moment_used = FALSE
     ),
-    class = class_name
+    class = "eigen_tl"
   )
+}
+
+#' Aggregate source-specific transfer-learning fits
+#'
+#' Combine a named list of source-specific [cov_tl()] fits or a named list of
+#' source-specific [eigen_tl()] fits. CovTL candidates are weighted by their
+#' nonnegative shrinkage-gain proxies. EigenTL candidates are weighted by the
+#' positive held-out reconstruction-score gain of the selected path point over
+#' the zero-transfer point. Equal source prior weights are used by default.
+#'
+#' The input list must contain one homogeneous fit family. EigenTL fits must
+#' share the target folds and rank. All fits must use the same target
+#' covariance. The returned covariance is the convex model average of the
+#' source-specific fitted covariances.
+#'
+#' @param fits Named list of at least two `cov_tl` fits or at least two
+#'   `eigen_tl` fits, with one element per source.
+#' @param prior Optional nonnegative source prior weights. An unnamed vector is
+#'   matched by list order; a named vector is matched by source name. The
+#'   default is equal prior weight. Prior weights are normalized internally.
+#'
+#' @return An object of class `multi_source_tl` containing the model-averaged
+#'   covariance, source weights, gain scores, effective source contributions,
+#'   and the original candidates. For EigenTL candidates, leading eigenvectors,
+#'   eigenvalues, a rank-constrained projector, and the convex average of the
+#'   candidate projectors are also returned.
+#' @export
+multi_source_tl <- function(fits, prior = NULL) {
+  if (!is.list(fits) || length(fits) < 2L) {
+    stop("fits must be a list containing at least two fitted objects.", call. = FALSE)
+  }
+  source_names <- names(fits)
+  if (is.null(source_names)) {
+    source_names <- paste0("source_", seq_along(fits))
+  }
+  if (anyNA(source_names) || any(!nzchar(source_names)) ||
+      anyDuplicated(source_names)) {
+    stop("fits must have unique, nonempty source names.", call. = FALSE)
+  }
+  names(fits) <- source_names
+
+  is_cov <- vapply(fits, inherits, logical(1), what = "cov_tl")
+  is_eigen <- vapply(fits, inherits, logical(1), what = "eigen_tl")
+  if (all(is_cov)) {
+    fit_family <- "cov_tl"
+  } else if (all(is_eigen)) {
+    fit_family <- "eigen_tl"
+  } else {
+    stop(
+      "fits must contain only cov_tl objects or only eigen_tl objects.",
+      call. = FALSE
+    )
+  }
+
+  n_sources <- length(fits)
+  if (is.null(prior)) {
+    prior <- rep(1 / n_sources, n_sources)
+  } else {
+    if (!is.numeric(prior) || length(prior) != n_sources ||
+        any(!is.finite(prior)) || any(prior < 0) || sum(prior) <= 0) {
+      stop(
+        "prior must contain one nonnegative finite value per source and have positive sum.",
+        call. = FALSE
+      )
+    }
+    if (!is.null(names(prior))) {
+      if (!setequal(names(prior), source_names)) {
+        stop("named prior values must match the names of fits.", call. = FALSE)
+      }
+      prior <- prior[source_names]
+    }
+    prior <- prior / sum(prior)
+  }
+  names(prior) <- source_names
+
+  target_covariance <- fits[[1L]]$target_covariance
+  if (!is.matrix(target_covariance) || nrow(target_covariance) < 1L ||
+      nrow(target_covariance) != ncol(target_covariance) ||
+      any(!is.finite(target_covariance))) {
+    stop("Every fit must contain a finite square target_covariance.", call. = FALSE)
+  }
+  p <- nrow(target_covariance)
+  tolerance <- sqrt(.Machine$double.eps) *
+    max(1, max(abs(target_covariance)))
+  candidate_covariances <- vector("list", n_sources)
+  names(candidate_covariances) <- source_names
+  for (source_index in seq_along(fits)) {
+    candidate <- fits[[source_index]]$covariance
+    target <- fits[[source_index]]$target_covariance
+    if (!is.matrix(candidate) || !identical(dim(candidate), c(p, p)) ||
+        any(!is.finite(candidate))) {
+      stop("Every fit must contain a compatible finite covariance matrix.", call. = FALSE)
+    }
+    if (!is.matrix(target) || !identical(dim(target), c(p, p)) ||
+        any(!is.finite(target)) ||
+        max(abs(target - target_covariance)) > tolerance) {
+      stop("All fits must use the same target covariance.", call. = FALSE)
+    }
+    candidate_covariances[[source_index]] <- candidate
+  }
+
+  if (fit_family == "cov_tl") {
+    signed_gains <- vapply(fits, function(fit) fit$lambda, numeric(1))
+    if (any(!is.finite(signed_gains)) || any(signed_gains < 0) ||
+        any(signed_gains > 1)) {
+      stop("Every cov_tl fit must contain lambda in [0, 1].", call. = FALSE)
+    }
+    gains <- signed_gains
+    transfer_coefficients <- signed_gains
+    aggregation <- "shrinkage_gain"
+    rank <- NULL
+  } else {
+    rank <- fits[[1L]]$rank
+    if (any(vapply(fits, function(fit) !identical(fit$rank, rank), logical(1)))) {
+      stop("All eigen_tl fits must use the same rank.", call. = FALSE)
+    }
+    reference_method <- fits[[1L]]$method
+    if (any(vapply(
+      fits,
+      function(fit) !identical(fit$method, reference_method),
+      logical(1)
+    ))) {
+      stop("All eigen_tl fits must use the same method.", call. = FALSE)
+    }
+    reference_grid <- fits[[1L]]$source_fraction_grid
+    if (any(vapply(
+      fits,
+      function(fit) !identical(fit$source_fraction_grid, reference_grid),
+      logical(1)
+    ))) {
+      stop("All eigen_tl fits must use the same source fraction grid.", call. = FALSE)
+    }
+    reference_center <- fits[[1L]]$center
+    if (any(vapply(
+      fits,
+      function(fit) !identical(fit$center, reference_center),
+      logical(1)
+    ))) {
+      stop("All eigen_tl fits must use the same centering rule.", call. = FALSE)
+    }
+    reference_fold_id <- fits[[1L]]$fold_id
+    if (any(vapply(
+      fits,
+      function(fit) !identical(fit$fold_id, reference_fold_id),
+      logical(1)
+    ))) {
+      stop("All eigen_tl fits must use identical target folds.", call. = FALSE)
+    }
+    reference_target_score <- fits[[1L]]$target_score
+    score_tolerance <- sqrt(.Machine$double.eps) *
+      max(1, abs(reference_target_score))
+    if (any(vapply(
+      fits,
+      function(fit) {
+        !is.finite(fit$target_score) ||
+          abs(fit$target_score - reference_target_score) > score_tolerance
+      },
+      logical(1)
+    ))) {
+      stop("All eigen_tl fits must have the same zero-transfer target score.", call. = FALSE)
+    }
+    signed_gains <- vapply(
+      fits,
+      function(fit) fit$reconstruction_gain,
+      numeric(1)
+    )
+    transfer_coefficients <- vapply(
+      fits,
+      function(fit) fit$selected_weight,
+      numeric(1)
+    )
+    if (any(!is.finite(signed_gains)) ||
+        any(!is.finite(transfer_coefficients)) ||
+        any(transfer_coefficients < 0) || any(transfer_coefficients > 1)) {
+      stop("Every eigen_tl fit must contain finite path gain diagnostics.", call. = FALSE)
+    }
+    gains <- pmax(signed_gains, 0)
+    aggregation <- "reuse_cv_reconstruction_gain"
+  }
+  names(signed_gains) <- source_names
+  names(gains) <- source_names
+  names(transfer_coefficients) <- source_names
+
+  unnormalized_weights <- prior * gains
+  if (sum(unnormalized_weights) > 0) {
+    weights <- unnormalized_weights / sum(unnormalized_weights)
+    fallback <- FALSE
+  } else {
+    weights <- prior
+    fallback <- TRUE
+  }
+  names(weights) <- source_names
+
+  covariance <- matrix(0, nrow = p, ncol = p)
+  for (source_index in seq_along(candidate_covariances)) {
+    covariance <- covariance +
+      weights[source_index] * candidate_covariances[[source_index]]
+  }
+  covariance <- .ld_symmetrize(covariance)
+  effective_source_weights <- weights * transfer_coefficients
+  names(effective_source_weights) <- source_names
+
+  output <- list(
+    covariance = covariance,
+    weights = weights,
+    prior = prior,
+    gains = gains,
+    signed_gains = signed_gains,
+    aggregation = aggregation,
+    prior_fallback = fallback,
+    fit_family = fit_family,
+    source_names = source_names,
+    transfer_coefficients = transfer_coefficients,
+    effective_source_weights = effective_source_weights,
+    target_weight = 1 - sum(effective_source_weights),
+    target_covariance = target_covariance,
+    candidate_covariances = candidate_covariances,
+    fits = fits
+  )
+
+  if (fit_family == "eigen_tl") {
+    fit_eig <- .ld_eigen(covariance)
+    vectors <- fit_eig$vectors[, seq_len(rank), drop = FALSE]
+    projector <- .ld_symmetrize(
+      .ld_matrix_multiply(vectors, vectors, transB = TRUE)
+    )
+    projector_average <- matrix(0, nrow = p, ncol = p)
+    for (source_index in seq_along(fits)) {
+      projector_average <- projector_average +
+        weights[source_index] * fits[[source_index]]$projector
+    }
+    output$vectors <- vectors
+    output$projector <- projector
+    output$projector_average <- .ld_symmetrize(projector_average)
+    output$eigenvalues <- fit_eig$values[seq_len(rank)]
+    output$rank <- rank
+    output$methods <- vapply(fits, function(fit) fit$method, character(1))
+  }
+
+  structure(output, class = "multi_source_tl")
 }
 
 .ld_path_source_size <- function(source_resolved, n_source) {

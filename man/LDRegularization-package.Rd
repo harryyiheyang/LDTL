@@ -6,7 +6,7 @@
 \alias{LDRegularization-package}
 \title{LDRegularization native registration}
 \description{
-Provides methods for regularizing large-scale linkage disequilibrium (LD) matrices. It implements a variety of regularization techniques, including shrinkage, nonlinear shrinkage, banding, tapering, thresholding, standard POET extensions, and tuning-free transfer learning for covariance matrices and eigenspaces. The package enables efficient computation for high-dimensional LD matrix estimation via CppMatrix-backed matrix operations where possible.
+Provides methods for regularizing large-scale linkage disequilibrium (LD) matrices. It implements a variety of regularization techniques, including shrinkage, nonlinear shrinkage, banding, tapering, thresholding, standard POET extensions, and transfer learning for covariance matrices and eigenspaces, including almost tuning-free multi-source aggregation. The package enables efficient computation for high-dimensional LD matrix estimation via CppMatrix-backed matrix operations where possible.
 }
 \author{
 \strong{Maintainer}: Yihe Yang \email{yxy1234@case.edu}

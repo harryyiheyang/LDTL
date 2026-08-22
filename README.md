@@ -46,10 +46,13 @@ The package currently includes the following main functions:
   cohort. It returns a reusable source covariance and scalar fourth-moment
   noise estimate without retaining the source individuals.
 
-- eigspac_tl: Tuning-free eigenspace transfer learning. It estimates the
-  first-order pooling rate in spectral-projector tangent geometry. Source
-  moments automatically activate the finite-source tangent-noise proxy; a
-  covariance matrix uses the summary-only rule.
+- eigen_tl: Fold-adjusted covariance-path eigenspace transfer learning. Its
+  default paired one-standard-error selector favors more transfer among
+  competitive candidates; `method = "min"` selects minimum reconstruction
+  risk.
+
+- multi_source_tl: Almost tuning-free aggregation of source-specific CovTL or
+  EigenTL fits using shrinkage gain or held-out reconstruction gain.
 
 Most matrix estimators accept either a precomputed matrix (`S` or `A`) or
 individual-level data `X`. Nonlinear shrinkage requires `X`. The POET functions
@@ -100,17 +103,19 @@ cov_fit$lambda       # weight on the source covariance
 cov_fit$alpha        # lambda / (1 - lambda)
 Sigma_tl <- cov_fit$covariance
 
-eig_fit <- eigspac_tl(X_target, S_source, rank = 3)
+eig_fit <- eigen_tl(
+  X_target,
+  S_source,
+  rank = 3,
+  n_source = 1000
+)
 U_tl <- eig_fit$vectors
 P_tl <- eig_fit$projector
 ```
 
-For `eigspac_tl()`, an independently estimated `S_pilot` can be supplied to make
-the tangent-risk criterion conditionally unbiased for a fixed spectral
-derivative. Without it, the function uses the full-sample first-order plug-in
-rule. If the mean must be estimated from `X_target`, use `center = TRUE`; the
-resulting weight is then a practical plug-in rule. Neither function performs
-CV or grid search.
+`eigen_tl()` uses `method = "one_se"` by default. Set `method = "min"` to
+select the raw held-out reconstruction-risk minimizer. Supply a common
+`fold_id` when comparing multiple sources.
 
 When source individual-level data are available, preprocess them once and
 reuse the resulting summary across target fits:
@@ -129,7 +134,7 @@ cov_finite <- cov_tl(
   center = FALSE
 )
 
-eig_finite <- eigspac_tl(
+eig_finite <- eigen_tl(
   X_target,
   source_fit,
   rank = 3,
@@ -145,26 +150,23 @@ computes only `sum_i ||X_source[i, ]||^4`, reducing the extra work to
 The covariance output is still `p` by `p`, so variant/LD-region blocking is a
 separate requirement when `p` itself is too large.
 
-The public `cov_tl()` and `eigspac_tl()` entry points select the branch from the
-source object. The original summary-only analytic implementations remain
-internal as `cov_tl1()` and `eigspac_tl1()`.
-
-Teacher B's path-adaptive framework is exposed through two more independent
-entry points. Both interpret each grid value as an effective fraction of the
-available source sample, adjust its weight separately inside every target
-fold, and refit the selected fraction on all target observations:
+Teacher B's path-adaptive framework is the package's EigenTL implementation.
+Each grid value is an effective fraction of the available source sample. Its
+weight is adjusted separately inside every target fold, and the selected
+fraction is refitted on all target observations:
 
 ```r
 fold_id <- sample(rep(1:5, length.out = nrow(X_target)))
 
-path_max <- path_tpca_max_score(
+eig_min <- eigen_tl(
   X_target,
   source_fit,       # or S_source together with n_source
   rank = 3,
-  fold_id = fold_id
+  fold_id = fold_id,
+  method = "min"
 )
 
-path_one_se <- path_tpca_one_se(
+eig_one_se <- eigen_tl(
   X_target,
   source_fit,
   rank = 3,
@@ -172,21 +174,38 @@ path_one_se <- path_tpca_one_se(
 )
 ```
 
-`path_tpca_max_score()` selects the raw held-out target-score maximizer.
-`path_tpca_one_se()` instead selects the largest source fraction whose paired
-per-individual score deficit is within one standard error of that maximizer.
-These two path estimators use the source covariance and sample size, but not
-the fourth moment. The public transfer-learning API therefore consists of
-`cov_tl()`, `eigspac_tl()`, `path_tpca_max_score()`, and
-`path_tpca_one_se()`. A common subspace dimension should be chosen externally
-before comparing the eigenspace and path estimators.
+The path uses the source covariance and sample size, but not the fourth moment.
+A common subspace dimension should be chosen externally before comparing
+sources.
 
-Both transfer-learning functions prioritize `CppMatrix` for covariance
+Multiple source-specific fits can be aggregated without pre-mixing source
+covariances:
+
+```r
+cov_fits <- list(
+  EUR = cov_tl(X_target, source_eur),
+  AFR = cov_tl(X_target, source_afr),
+  AMR = cov_tl(X_target, source_amr)
+)
+cov_multi <- multi_source_tl(cov_fits)
+
+eig_fits <- list(
+  EUR = eigen_tl(X_target, source_eur, rank = 3, fold_id = fold_id),
+  AFR = eigen_tl(X_target, source_afr, rank = 3, fold_id = fold_id),
+  AMR = eigen_tl(X_target, source_amr, rank = 3, fold_id = fold_id)
+)
+eig_multi <- multi_source_tl(eig_fits)
+```
+
+CovTL candidates are weighted by their normalized shrinkage coefficients,
+which act as plug-in single-source risk-gain scores. EigenTL candidates are
+weighted by the positive held-out reconstruction-score gain of their selected
+path points over zero transfer. Equal source priors are used by default.
+
+The transfer-learning functions prioritize `CppMatrix` for covariance
 construction, matrix products, centering, projector construction, and spectral
 decomposition. Base R is used only as a guarded fallback or for scalar
-reductions not exposed by `CppMatrix`. In `eigspac_tl()`, the tangent variance is
-computed with a CppMatrix cross-product identity rather than an
-`rank * (p - rank)` R loop.
+reductions not exposed by `CppMatrix`.
 
 The source-target Frobenius distance is evaluated directly as
 `norm(S_source - S_target, "F")^2`. This avoids the cancellation that can

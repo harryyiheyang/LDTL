@@ -45,61 +45,17 @@ test_that("cov_tl handles the URE boundary and optional centering", {
   )
 })
 
-test_that("eigspac_tl uses the analytic first-order tangent-risk weight", {
-  X <- cbind(
-    c(2, -2, 1, -1),
-    c(1, 1, -1, -1)
-  )
-  S_target <- crossprod(X) / nrow(X)
-  S_source <- matrix(c(2.5, 0.2, 0.2, 1), 2, 2)
-  gap <- S_target[1, 1] - S_target[2, 2]
-  cross_scores <- X[, 1] * X[, 2]
-  tangent_variance <-
-    2 * sum(cross_scores^2) / (nrow(X) * (nrow(X) - 1) * gap^2)
-  tangent_distance <- 2 * (S_source[1, 2] / gap)^2
-  expected_lambda <- min(tangent_variance / tangent_distance, 1)
-
-  fit <- eigspac_tl(X, S_source, rank = 1)
-
-  expect_s3_class(fit, "eigspac_tl")
-  expect_equal(fit$tangent_variance, tangent_variance)
-  expect_equal(fit$tangent_distance_squared, tangent_distance)
-  expect_equal(fit$lambda, expected_lambda)
-  expect_equal(fit$projector, tcrossprod(fit$vectors))
-  expect_equal(sum(diag(fit$projector)), 1)
-  expect_false(fit$conditional_ure_if_pilot_independent)
-})
-
-test_that("eigspac_tl supports an independent pilot derivative", {
-  X <- cbind(
-    c(2, -2, 1, -1),
-    c(1, 1, -1, -1)
-  )
-  S_source <- matrix(c(2.5, 0.2, 0.2, 1), 2, 2)
-  S_pilot <- diag(c(3, 1))
-
-  fit <- eigspac_tl(
-    X,
-    S_source,
-    rank = 1,
-    center = FALSE,
-    S_pilot = S_pilot
-  )
-
-  expect_true(fit$pilot_supplied)
-  expect_true(fit$conditional_ure_if_pilot_independent)
-  expect_equal(fit$pilot_eigengap, 2)
-})
-
 test_that("transfer-learning inputs are validated", {
   X <- matrix(rnorm(20), 10, 2)
 
   expect_error(cov_tl(X, diag(3)), "same number of variables")
-  expect_error(eigspac_tl(X, diag(2), rank = 0), "rank must be between")
-  expect_error(eigspac_tl(X, diag(2), rank = 2), "rank must be between")
   expect_error(
-    eigspac_tl(X, diag(2), rank = 1, S_pilot = diag(2)),
-    "eigengap"
+    eigen_tl(X, diag(2), rank = 0, n_source = 20),
+    "rank must be between"
+  )
+  expect_error(
+    eigen_tl(X, diag(2), rank = 1, n_source = 20, method = "median"),
+    "arg"
   )
 })
 
@@ -250,84 +206,18 @@ test_that("source moment inputs reject missing and incompatible data", {
   )
 })
 
-test_that("eigspac_tl selects its finite-source branch from the source input", {
-  X_target <- cbind(
-    c(2, -2, 1, -1),
-    c(1, 1, -1, -1)
-  )
-  X_source <- cbind(
-    c(2.3, -2.0, 1.0, -1.2, 0.2, -0.3),
-    c(0.9, 1.1, -0.8, -1.0, 0.1, -0.3)
-  )
-  source_fit <- source_moments_method(
-    X_source,
-    center = FALSE,
-    block_size = 2
-  )
-  legacy <- LDRegularization:::eigspac_tl1(
-    X_target,
-    source_fit$covariance,
-    rank = 1,
-    center = FALSE
-  )
-  finite_source <- eigspac_tl(
-    X_target,
-    source_fit,
-    rank = 1,
-    center = FALSE
-  )
-  expected_source_tangent <-
-    source_fit$variance / legacy$pilot_eigengap^2
-  expected_denominator <- max(
-    legacy$tangent_variance + expected_source_tangent,
-    legacy$tangent_distance_squared
-  )
-
-  expect_s3_class(finite_source, "eigspac_tl")
-  expect_identical(
-    finite_source$source_tangent_variance_type,
-    "frobenius_eigengap_upper_proxy"
-  )
-  expect_equal(finite_source$source_tangent_variance, expected_source_tangent)
-  expect_equal(finite_source$denominator, expected_denominator)
-  expect_equal(
-    finite_source$lambda,
-    legacy$tangent_variance / expected_denominator
-  )
-
-  supplied <- eigspac_tl(
-    X_target,
-    source_fit,
-    rank = 1,
-    center = FALSE,
-    source_tangent_variance = 0.125
-  )
-  expect_identical(
-    supplied$source_tangent_variance_type,
-    "target_specific_supplied"
-  )
-  expect_equal(supplied$source_tangent_variance, 0.125)
-  summary_only <- eigspac_tl(
-    X_target,
-    source_fit$covariance,
-    rank = 1,
-    center = FALSE
-  )
-  expect_identical(summary_only$weight_method, "summary_only_tangent_ure")
-  expect_equal(summary_only$lambda, legacy$lambda)
-  expect_s3_class(legacy, "eigspac_tl1")
-})
-
-test_that("legacy and stabilized transfer names are not exported", {
+test_that("deprecated transfer names are not exported", {
   exports <- getNamespaceExports("LDRegularization")
 
   expect_false("cov_tl1" %in% exports)
-  expect_false("eigspac_tl1" %in% exports)
-  expect_false("cov_tl_stabilized" %in% exports)
-  expect_false("eigspac_tl_stabilized" %in% exports)
+  expect_false("eigspac_tl" %in% exports)
+  expect_false("path_tpca_max_score" %in% exports)
+  expect_false("path_tpca_one_se" %in% exports)
+  expect_true("eigen_tl" %in% exports)
+  expect_true("multi_source_tl" %in% exports)
 })
 
-test_that("Teacher-B max-score path uses fold-adjusted effective source sizes", {
+test_that("EigenTL min path uses fold-adjusted effective source sizes", {
   X_target <- rbind(
     c(2.0, 0.0),
     c(-2.0, 0.0),
@@ -340,18 +230,19 @@ test_that("Teacher-B max-score path uses fold-adjusted effective source sizes", 
   fold_id <- c(1, 2, 3, 1, 2, 3)
   zeta <- c(0, 0.5, 1)
 
-  fit <- path_tpca_max_score(
+  fit <- eigen_tl(
     X_target,
     S_source,
     rank = 1,
     n_source = 12,
     source_fraction_grid = zeta,
     center = FALSE,
-    fold_id = fold_id
+    fold_id = fold_id,
+    method = "min"
   )
 
-  expect_s3_class(fit, "path_tpca_max_score")
-  expect_identical(fit$selector, "max_score")
+  expect_s3_class(fit, "eigen_tl")
+  expect_identical(fit$method, "min")
   expect_equal(fit$selected_index, which.max(fit$mean_scores))
   expect_equal(fit$selected_zeta, zeta[fit$selected_index])
   expect_equal(fit$fold_weights[, 1], rep(0, 3))
@@ -365,8 +256,14 @@ test_that("Teacher-B max-score path uses fold-adjusted effective source sizes", 
   expect_equal(fit$projector %*% fit$projector, fit$projector,
                tolerance = 1e-10)
   expect_false(fit$source_fourth_moment_used)
+  expect_equal(
+    fit$reconstruction_gain,
+    fit$selected_score - fit$target_score
+  )
   expect_error(
-    path_tpca_max_score(X_target, S_source, rank = 1, fold_id = fold_id),
+    eigen_tl(
+      X_target, S_source, rank = 1, fold_id = fold_id, method = "min"
+    ),
     "n_source is required"
   )
 })
@@ -398,15 +295,16 @@ test_that("Teacher-B paired one-SE rule matches its individual score formula", {
   fold_id <- c(1, 2, 3, 1, 2, 3)
   zeta <- c(0, 0.25, 0.5, 1)
 
-  max_fit <- path_tpca_max_score(
+  min_fit <- eigen_tl(
     X_target,
     source_fit,
     rank = 1,
     source_fraction_grid = zeta,
     center = FALSE,
-    fold_id = fold_id
+    fold_id = fold_id,
+    method = "min"
   )
-  one_se <- path_tpca_one_se(
+  one_se <- eigen_tl(
     X_target,
     source_fit,
     rank = 1,
@@ -415,26 +313,26 @@ test_that("Teacher-B paired one-SE rule matches its individual score formula", {
     fold_id = fold_id
   )
 
-  paired <- one_se$observation_scores[, one_se$max_score_index] -
+  paired <- one_se$observation_scores[, one_se$best_index] -
     one_se$observation_scores
   expected_se <- apply(paired, 2, stats::sd) / sqrt(nrow(X_target))
-  expected_se[one_se$max_score_index] <- 0
+  expected_se[one_se$best_index] <- 0
   tolerance <- .Machine$double.eps * max(1, abs(one_se$mean_scores))
   expected_competitive <- which(
     one_se$score_gaps <= expected_se + tolerance
   )
 
-  expect_s3_class(one_se, "path_tpca_one_se")
-  expect_identical(one_se$selector, "paired_one_se")
-  expect_equal(one_se$observation_scores, max_fit$observation_scores)
+  expect_s3_class(one_se, "eigen_tl")
+  expect_identical(one_se$method, "one_se")
+  expect_equal(one_se$observation_scores, min_fit$observation_scores)
   expect_equal(one_se$paired_standard_errors, expected_se)
   expect_equal(one_se$competitive_set, expected_competitive)
   expect_equal(one_se$selected_index, max(expected_competitive))
-  expect_gte(one_se$selected_index, one_se$max_score_index)
+  expect_gte(one_se$selected_index, one_se$best_index)
   expect_equal(one_se$n_source, nrow(X_source))
   expect_false(one_se$source_fourth_moment_used)
   expect_error(
-    path_tpca_one_se(
+    eigen_tl(
       X_target,
       source_fit,
       rank = 1,
@@ -445,36 +343,159 @@ test_that("Teacher-B paired one-SE rule matches its individual score formula", {
   )
 })
 
-test_that("Teacher-B path inputs enforce the proposed grid and fold rules", {
+test_that("EigenTL inputs enforce the proposed grid and fold rules", {
   X <- matrix(seq_len(18), 6, 3)
   S <- diag(3)
 
   expect_error(
-    path_tpca_max_score(
+    eigen_tl(
       X, S, rank = 1, n_source = 10,
-      source_fraction_grid = c(0, 0.5), fold_id = rep(1:2, 3)
+      source_fraction_grid = c(0, 0.5), fold_id = rep(1:2, 3), method = "min"
     ),
     "include endpoints"
   )
   expect_error(
-    path_tpca_max_score(
+    eigen_tl(
       X, S, rank = 1, n_source = 10,
-      source_fraction_grid = c(0, 0.5, 0.5, 1),
-      fold_id = rep(1:2, 3)
+      source_fraction_grid = c(0, 0.5, 0.5, 1), fold_id = rep(1:2, 3),
+      method = "min"
     ),
     "strictly increasing"
   )
   expect_error(
-    path_tpca_one_se(
+    eigen_tl(
       X, S, rank = 1, n_source = 10,
       fold_id = rep(1:2, 3), standard_error_multiplier = -1
     ),
     "nonnegative"
   )
   expect_error(
-    path_tpca_max_score(
-      X, S, rank = 1, n_source = 10, fold_id = rep(1, 6)
+    eigen_tl(
+      X, S, rank = 1, n_source = 10, fold_id = rep(1, 6), method = "min"
     ),
     "at least two"
+  )
+})
+
+test_that("multi_source_tl uses CovTL shrinkage gains", {
+  X <- rbind(
+    c(2.0, 0.0),
+    c(-2.0, 0.0),
+    c(1.0, 1.0),
+    c(-1.0, -1.0),
+    c(0.5, -0.5),
+    c(-0.5, 0.5)
+  )
+  fits <- list(
+    EUR = cov_tl(X, diag(c(3.0, 0.5)), center = FALSE),
+    AFR = cov_tl(X, diag(c(2.0, 1.0)), center = FALSE),
+    AMR = cov_tl(X, diag(c(1.5, 1.5)), center = FALSE)
+  )
+
+  fit <- multi_source_tl(fits)
+  expected_weights <- vapply(fits, function(x) x$lambda, numeric(1))
+  expected_weights <- expected_weights / sum(expected_weights)
+  expected_covariance <- matrix(0, 2, 2)
+  for (source_index in seq_along(fits)) {
+    expected_covariance <- expected_covariance +
+      expected_weights[source_index] * fits[[source_index]]$covariance
+  }
+
+  expect_s3_class(fit, "multi_source_tl")
+  expect_identical(fit$fit_family, "cov_tl")
+  expect_identical(fit$aggregation, "shrinkage_gain")
+  expect_equal(fit$weights, expected_weights)
+  expect_equal(fit$covariance, expected_covariance)
+  expect_equal(sum(fit$weights), 1)
+  expect_equal(
+    fit$effective_source_weights,
+    fit$weights * vapply(fits, function(x) x$lambda, numeric(1))
+  )
+  expect_equal(
+    fit$target_weight + sum(fit$effective_source_weights),
+    1
+  )
+})
+
+test_that("multi_source_tl uses EigenTL reconstruction gains", {
+  X <- rbind(
+    c(2.0, 0.1),
+    c(-1.8, -0.2),
+    c(1.1, 0.8),
+    c(-0.9, -1.0),
+    c(0.4, -0.7),
+    c(-0.5, 0.6)
+  )
+  fold_id <- c(1, 2, 3, 1, 2, 3)
+  source <- list(
+    EUR = diag(c(3.0, 0.5)),
+    AFR = matrix(c(2.0, 0.4, 0.4, 1.0), 2, 2),
+    AMR = diag(c(1.2, 1.1))
+  )
+  fits <- lapply(source, function(S) {
+    eigen_tl(
+      X,
+      S,
+      rank = 1,
+      n_source = 20,
+      source_fraction_grid = c(0, 0.5, 1),
+      center = FALSE,
+      fold_id = fold_id
+    )
+  })
+  gains <- c(EUR = 0.1, AFR = 0.3, AMR = -0.1)
+  for (source_name in names(fits)) {
+    fits[[source_name]]$reconstruction_gain <- gains[source_name]
+  }
+
+  fit <- multi_source_tl(fits)
+
+  expect_s3_class(fit, "multi_source_tl")
+  expect_identical(fit$fit_family, "eigen_tl")
+  expect_identical(fit$aggregation, "reuse_cv_reconstruction_gain")
+  expect_equal(fit$signed_gains, gains)
+  expect_equal(fit$weights, c(EUR = 0.25, AFR = 0.75, AMR = 0))
+  expect_equal(sum(diag(fit$projector)), 1, tolerance = 1e-10)
+  expect_equal(
+    fit$projector %*% fit$projector,
+    fit$projector,
+    tolerance = 1e-10
+  )
+  expect_equal(sum(fit$weights), 1)
+})
+
+test_that("multi_source_tl validates fit families, folds, and priors", {
+  X <- matrix(rnorm(24), 12, 2)
+  cov_fit <- cov_tl(X, diag(2))
+  fold_id <- rep(1:3, 4)
+  eigen_fit <- eigen_tl(
+    X,
+    diag(2),
+    rank = 1,
+    n_source = 20,
+    fold_id = fold_id
+  )
+
+  expect_error(
+    multi_source_tl(list(EUR = cov_fit, AFR = eigen_fit)),
+    "only cov_tl objects or only eigen_tl objects"
+  )
+  expect_error(
+    multi_source_tl(list(EUR = cov_fit, AFR = cov_fit), prior = c(1, -1)),
+    "nonnegative"
+  )
+
+  other_fold <- eigen_fit
+  other_fold$fold_id <- rev(other_fold$fold_id)
+  expect_error(
+    multi_source_tl(list(EUR = eigen_fit, AFR = other_fold)),
+    "identical target folds"
+  )
+
+  other_method <- eigen_fit
+  other_method$method <- "min"
+  expect_error(
+    multi_source_tl(list(EUR = eigen_fit, AFR = other_method)),
+    "same method"
   )
 })

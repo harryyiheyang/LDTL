@@ -1,4 +1,4 @@
 library(testthat)
-library(LDRegularization)
+library(LDTL)
 
-test_check("LDRegularization")
+test_check("LDTL")

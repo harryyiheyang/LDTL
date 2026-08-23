@@ -9,7 +9,7 @@ test_that("linear shrinkage uses the MSE plug-in rule below its boundary", {
     byrow = TRUE
   )
   target <- diag(3)
-  alpha_mse <- LDRegularization:::.ld_mse_shrinkage_intensity(
+  alpha_mse <- LDTL:::.ld_mse_shrinkage_intensity(
     S,
     n = 10000,
     target = target

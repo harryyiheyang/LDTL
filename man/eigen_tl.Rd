@@ -20,7 +20,7 @@ eigen_tl(
 \arguments{
 \item{X_target}{Target individual-level data matrix.}
 
-\item{source}{An `ld_source_moments` object or a source covariance matrix.}
+\item{source}{An `ldtl_source_moments` object or a source covariance matrix.}
 
 \item{rank}{Number of leading target eigenvectors.}
 

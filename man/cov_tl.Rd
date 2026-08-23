@@ -9,7 +9,7 @@ cov_tl(X_target, source, center = TRUE)
 \arguments{
 \item{X_target}{Target individual-level matrix with observations in rows.}
 
-\item{source}{Either an object returned by [source_moments_method()] or a
+\item{source}{Either an object returned by [source_moments()] or a
 source covariance matrix.}
 
 \item{center}{If `TRUE`, subtract target sample column means.}
@@ -20,7 +20,7 @@ An object of class `cov_tl` with the pooled covariance, selected
 }
 \description{
 Pool a target sample covariance with a source covariance using a closed-form
-URE weight. With a `ld_source_moments` object, source sampling noise is
+URE weight. With an `ldtl_source_moments` object, source sampling noise is
 included through
 \deqn{\widehat\lambda = \widehat V_1 /
 \max\{\widehat V_1 + \widehat V_0,

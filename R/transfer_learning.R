@@ -1,11 +1,11 @@
-#' Compute source moments directly from a PLINK additive raw file
+#' Compute reusable source moments from a PLINK additive raw file
 #'
 #' Read a PLINK 2 `--export A` file in C++ blocks without materializing the
 #' individual-by-variant matrix in R. The first pass estimates variant means
 #' and root-mean-square scales after mean imputation; the second pass computes
 #' the scalar fourth-moment sum needed by finite-source transfer learning.
-#' When `S_source` is omitted, the second pass also accumulates the standardized
-#' covariance with BLAS. When `S_source` is supplied, it is reused and the
+#' When `R_source` is omitted, the second pass also accumulates the standardized
+#' covariance with BLAS. When `R_source` is supplied, it is reused and the
 #' additional scan remains \eqn{O(n_0p)}.
 #'
 #' Missing dosages encoded as `NA` or `.` are imputed to their variant mean.
@@ -14,7 +14,7 @@
 #'
 #' @param raw_file Path to a PLINK 2 additive raw file produced by
 #'   `--export A`.
-#' @param S_source Optional precomputed source correlation matrix formed from
+#' @param R_source Optional precomputed source correlation matrix formed from
 #'   the same individuals, variants, allele coding, and independent scaling.
 #' @param block_size Number of samples parsed per C++/BLAS block. The default
 #'   uses about `2048 * p * 8` bytes for the genotype block.
@@ -22,15 +22,15 @@
 #'   steps. Zero uses the C++ runtime default. BLAS threading is controlled by
 #'   the linked BLAS implementation.
 #'
-#' @return An object of class `ld_source_moments`, with the same covariance,
+#' @return An object of class `ldtl_source_moments`, with the source covariance,
 #'   variance, fourth-moment, sample-size, and dimension fields consumed by
 #'   [cov_tl()] and [eigen_tl()]. File-scan diagnostics, variant IDs, means,
 #'   scales,
 #'   missing counts, and estimated C++ working bytes are also returned.
 #' @export
-source_moments_raw <- function(
+source_moments_plink <- function(
     raw_file,
-    S_source = NULL,
+    R_source = NULL,
     block_size = 2048L,
     n_threads = 0L
 ) {
@@ -52,7 +52,7 @@ source_moments_raw <- function(
     stop("n_threads must be zero or a positive integer.", call. = FALSE)
   }
 
-  compute_covariance <- is.null(S_source)
+  compute_covariance <- is.null(R_source)
   native <- cpp_source_moments_raw(
     raw_file,
     block_size = as.integer(block_size),
@@ -60,33 +60,30 @@ source_moments_raw <- function(
     compute_covariance = compute_covariance
   )
   if (compute_covariance) {
-    covariance <- native$covariance
+    R_source <- native$covariance
     variance_raw <- native$variance_raw
   } else {
-    covariance <- .ld_tl_source_covariance(S_source, native$p)
+    R_source <- .ld_tl_source_covariance(R_source, native$p, "R_source")
     n_double <- as.double(native$n)
     variance_raw <-
-      (native$fourth_sum - n_double * sum(covariance^2)) /
+      (native$fourth_sum - n_double * sum(R_source^2)) /
       (n_double * (n_double - 1))
   }
 
   structure(
     list(
-      covariance = covariance,
+      R_source = R_source,
       variance = max(variance_raw, 0),
       variance_raw = variance_raw,
       fourth_sum = native$fourth_sum,
-      n = native$n,
+      n_source = native$n,
       p = native$p,
       mean = native$mean,
       scale = native$scale,
       observed = native$observed,
       missing_calls = native$missing_calls,
       variants = native$variants,
-      center = TRUE,
-      scale_genotypes = TRUE,
       exact_known_mean_moments = FALSE,
-      normalization = "1/n",
       source_format = "PLINK2 --export A",
       passes = native$passes,
       block_size = native$block_size,
@@ -94,7 +91,7 @@ source_moments_raw <- function(
       working_bytes = native$working_bytes,
       covariance_computed = compute_covariance
     ),
-    class = "ld_source_moments"
+    class = "ldtl_source_moments"
   )
 }
 
@@ -105,7 +102,7 @@ source_moments_raw <- function(
 #' finite-source stabilized transfer. The returned object is reusable across
 #' target cohorts and does not retain `X_source`.
 #'
-#' If `S_source` is supplied, it is reused and the C++ scan only computes
+#' If `R_source` is supplied, it is reused and the C++ scan only computes
 #' \eqn{\sum_i \|X_{0i}\|_2^4}. This reduces the additional source pass from
 #' covariance cost to \eqn{O(n_0p)}. The supplied matrix must have been formed
 #' from exactly the same individuals and preprocessing as `X_source`, with
@@ -113,7 +110,7 @@ source_moments_raw <- function(
 #'
 #' @param X_source Source individual-level numeric or integer matrix with
 #'   individuals in rows. Missing genotypes must be imputed before calling.
-#' @param S_source Optional precomputed source second-moment matrix. If omitted,
+#' @param R_source Optional precomputed source second-moment matrix. If omitted,
 #'   it is computed in the same C++ block scan.
 #' @param center If `TRUE`, subtract source sample column means. This is a
 #'   practical plug-in moment rule; the exact displayed fourth-moment identity
@@ -123,13 +120,13 @@ source_moments_raw <- function(
 #'   and 65,536 individuals.
 #' @param n_threads Number of OpenMP threads. Zero uses the C++ runtime default.
 #'
-#' @return An object of class `ld_source_moments` containing `covariance`,
+#' @return An object of class `ldtl_source_moments` containing `R_source`,
 #'   `variance`, `fourth_sum`, sample size, preprocessing metadata, and native
 #'   execution diagnostics.
 #' @export
-source_moments_method <- function(
+source_moments <- function(
     X_source,
-    S_source = NULL,
+    R_source = NULL,
     center = FALSE,
     block_size = NULL,
     n_threads = 0L
@@ -155,9 +152,9 @@ source_moments_method <- function(
   }
   n_threads <- as.integer(n_threads)
 
-  compute_covariance <- is.null(S_source)
+  compute_covariance <- is.null(R_source)
   if (!compute_covariance) {
-    S_source <- .ld_tl_source_covariance(S_source, p)
+    R_source <- .ld_tl_source_covariance(R_source, p, "R_source")
   }
   native <- cpp_source_moments(
     X_source,
@@ -167,40 +164,38 @@ source_moments_method <- function(
     compute_covariance = compute_covariance
   )
   if (compute_covariance) {
-    S_source <- .ld_symmetrize(native$covariance)
+    R_source <- .ld_symmetrize(native$covariance)
     variance_raw <- native$variance_raw
   } else {
     n_double <- as.double(n)
     variance_raw <-
-      (native$fourth_sum - n_double * sum(S_source^2)) /
+      (native$fourth_sum - n_double * sum(R_source^2)) /
       (n_double * (n_double - 1))
   }
 
   structure(
     list(
-      covariance = S_source,
+      R_source = R_source,
       variance = max(variance_raw, 0),
       variance_raw = variance_raw,
       fourth_sum = native$fourth_sum,
-      n = n,
+      n_source = n,
       p = p,
       mean = native$mean,
-      center = isTRUE(center),
       exact_known_mean_moments = !isTRUE(center),
-      normalization = "1/n",
       block_size = native$block_size,
       threads_used = native$threads_used,
       openmp = native$openmp,
       covariance_computed = compute_covariance
     ),
-    class = "ld_source_moments"
+    class = "ldtl_source_moments"
   )
 }
 
 #' Tuning-free covariance transfer learning
 #'
 #' Pool a target sample covariance with a source covariance using a closed-form
-#' URE weight. With a `ld_source_moments` object, source sampling noise is
+#' URE weight. With an `ldtl_source_moments` object, source sampling noise is
 #' included through
 #' \deqn{\widehat\lambda = \widehat V_1 /
 #' \max\{\widehat V_1 + \widehat V_0,
@@ -209,7 +204,7 @@ source_moments_method <- function(
 #' unavailable and the summary-only denominator \eqn{\|S_0-S_1\|_F^2} is used.
 #'
 #' @param X_target Target individual-level matrix with observations in rows.
-#' @param source Either an object returned by [source_moments_method()] or a
+#' @param source Either an object returned by [source_moments()] or a
 #'   source covariance matrix.
 #' @param center If `TRUE`, subtract target sample column means.
 #'
@@ -253,96 +248,14 @@ cov_tl <- function(X_target, source, center = TRUE) {
       lambda = weight$lambda,
       alpha = weight$alpha,
       weight_method = weight_method,
-      target_covariance = target$covariance,
-      source_covariance = S_source,
       target_variance = target$variance,
-      source_variance = resolved$variance,
       distance_squared = distance_squared,
       noise_floor = noise_floor,
       mismatch_squared_raw = mismatch_squared_raw,
       mismatch_squared = mismatch_squared,
-      denominator = denominator,
-      n_target = target$n,
-      n_source = resolved$n,
-      center = isTRUE(center),
-      source_moments_supplied = resolved$has_variance,
-      exact_known_mean_ure = !isTRUE(center),
-      exact_known_mean_moments =
-        !isTRUE(center) && isTRUE(resolved$exact_known_mean_moments)
+      denominator = denominator
     ),
     class = "cov_tl"
-  )
-}
-
-#' Legacy summary-only covariance transfer learning
-#'
-#' Pool a target sample covariance with a source covariance using the closed-form
-#' unbiased-risk-estimation (URE) weight. The source and target samples need not
-#' overlap, and source individual-level data are not required.
-#'
-#' The estimator is
-#' \deqn{\widehat\Sigma=(1-\widehat\lambda)S_1+
-#' \widehat\lambda S_0,}
-#' where
-#' \deqn{\widehat\lambda=\left[\widehat V_1 /
-#' \|S_0-S_1\|_F^2\right]_{[0,1]}.}
-#' Here `S1 = crossprod(X_target) / n` and `V1` is the matrix sample-variance
-#' estimator. Thus no cross-validation or tuning grid is used.
-#' Large matrix products and covariance construction use `CppMatrix` routines,
-#' with base R retained only as a fallback and for unsupported scalar
-#' reductions.
-#'
-#' @param X_target Target individual-level data matrix, with observations in
-#'   rows. For the exact finite-sample URE identity, its rows should be
-#'   independent and already centered at the known population mean.
-#' @param S_source Source covariance matrix on the same variables, ordering,
-#'   scale, and covariance normalization as the target covariance.
-#' @param center If `TRUE`, subtract target sample column means. This is useful
-#'   in practice but turns the exact known-mean URE into a plug-in rule. The
-#'   default is `TRUE`.
-#'
-#' @return An object of class `cov_tl1`, represented by a list with the pooled
-#'   `covariance`, analytic `lambda` and `alpha`, target covariance, target
-#'   variance estimate, observed source-target squared distance, and URE
-#'   quadratic coefficients.
-#' @keywords internal
-cov_tl1 <- function(X_target, S_source, center = TRUE) {
-  target <- .ld_tl_target_moments(X_target, center = center)
-  S_source <- .ld_tl_source_covariance(S_source, ncol(target$X))
-
-  distance_squared <- .ld_tl_frobenius_distance_squared(
-    S_source,
-    target$covariance
-  )
-  weight <- .ld_tl_closed_form_weight(
-    numerator = target$variance,
-    denominator = distance_squared
-  )
-
-  pooled <- .ld_symmetrize(
-    (1 - weight$lambda) * target$covariance +
-      weight$lambda * S_source
-  )
-
-  structure(
-    list(
-      covariance = pooled,
-      lambda = weight$lambda,
-      alpha = weight$alpha,
-      target_covariance = target$covariance,
-      source_covariance = S_source,
-      target_variance = target$variance,
-      distance_squared = distance_squared,
-      ure = c(
-        constant = target$variance,
-        linear = -2 * target$variance,
-        quadratic = distance_squared
-      ),
-      n_target = target$n,
-      center = isTRUE(center),
-      exact_known_mean_ure = !isTRUE(center)
-    ),
-    class = "cov_tl1"
   )
 }
 
@@ -359,7 +272,7 @@ cov_tl1 <- function(X_target, S_source, center = TRUE) {
 #' reconstruction risk, equivalently maximum captured target score.
 #'
 #' @param X_target Target individual-level data matrix.
-#' @param source An `ld_source_moments` object or a source covariance matrix.
+#' @param source An `ldtl_source_moments` object or a source covariance matrix.
 #' @param rank Number of leading target eigenvectors.
 #' @param n_source Source sample size. Required when `source` is a matrix and
 #'   checked against the stored sample size when source moments are supplied.
@@ -549,8 +462,6 @@ eigen_tl <- function(
       vectors = vectors,
       projector = projector,
       eigenvalues = fit_eig$values[seq_len(rank)],
-      rank = rank,
-      method = selector,
       selected_index = selected_index,
       selected_zeta = zeta[selected_index],
       selected_weight = selected_weight,
@@ -562,28 +473,13 @@ eigen_tl <- function(
       target_score = target_score,
       reconstruction_gain = reconstruction_gain,
       positive_reconstruction_gain = max(reconstruction_gain, 0),
-      source_fraction_grid = zeta,
       full_data_weights = full_weights,
       fold_weights = fold_weights,
       mean_scores = mean_scores,
       score_gaps = score_gaps,
       paired_standard_errors = paired_standard_errors,
       competitive_set = which(competitive),
-      observation_scores = observation_scores,
-      fold_id = fold_id,
-      target_covariance = target_covariance,
-      source_covariance = source_resolved$covariance,
-      target_mean = full_mean,
-      n_target = n_target,
-      n_source = n_source,
-      center = isTRUE(center),
-      standard_error_multiplier = if (selector == "min") {
-        NA_real_
-      } else {
-        standard_error_multiplier
-      },
-      exact_fold_pooling_endpoint = TRUE,
-      source_fourth_moment_used = FALSE
+      observation_scores = observation_scores
     ),
     class = "eigen_tl"
   )
@@ -717,10 +613,37 @@ eigen_tl <- function(
 }
 
 .ld_tl_resolve_source <- function(source, p) {
+  if (inherits(source, "ldtl_source_moments")) {
+    required <- c("R_source", "variance", "n_source", "p")
+    if (!all(required %in% names(source))) {
+      stop("The source moment object is incomplete.", call. = FALSE)
+    }
+    covariance <- .ld_tl_source_covariance(
+      source$R_source,
+      p,
+      "source$R_source"
+    )
+    if (length(source$variance) != 1L || !is.finite(source$variance) ||
+        source$variance < 0) {
+      stop("source$variance must be a nonnegative finite scalar.", call. = FALSE)
+    }
+    if (length(source$n_source) != 1L || !is.finite(source$n_source) ||
+        source$n_source < 2) {
+      stop("source$n_source must be at least 2.", call. = FALSE)
+    }
+    return(list(
+      covariance = covariance,
+      variance = as.double(source$variance),
+      n = as.double(source$n_source),
+      has_variance = TRUE,
+      exact_known_mean_moments = isTRUE(source$exact_known_mean_moments)
+    ))
+  }
+
   if (inherits(source, "ld_source_moments")) {
     required <- c("covariance", "variance", "n", "p")
     if (!all(required %in% names(source))) {
-      stop("The source moment object is incomplete.", call. = FALSE)
+      stop("The legacy source moment object is incomplete.", call. = FALSE)
     }
     covariance <- .ld_tl_source_covariance(
       source$covariance,

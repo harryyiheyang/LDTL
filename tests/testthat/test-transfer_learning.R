@@ -16,7 +16,6 @@ test_that("cov_tl uses the analytic covariance URE weight", {
   fit <- cov_tl(X, S_source, center = FALSE)
 
   expect_s3_class(fit, "cov_tl")
-  expect_equal(fit$target_covariance, S_target)
   expect_equal(fit$target_variance, variance)
   expect_equal(fit$distance_squared, distance_squared)
   expect_equal(fit$lambda, expected_lambda)
@@ -25,7 +24,11 @@ test_that("cov_tl uses the analytic covariance URE weight", {
     (1 - expected_lambda) * S_target + expected_lambda * S_source
   )
   expect_equal(fit$alpha, fit$lambda / (1 - fit$lambda))
-  expect_true(fit$exact_known_mean_ure)
+  expect_null(fit$target_covariance)
+  expect_null(fit$source_covariance)
+  expect_null(fit$n_target)
+  expect_null(fit$n_source)
+  expect_null(fit$center)
 })
 
 test_that("cov_tl handles the URE boundary and optional centering", {
@@ -37,12 +40,7 @@ test_that("cov_tl handles the URE boundary and optional centering", {
   expect_identical(boundary$alpha, Inf)
 
   centered <- cov_tl(X, S_target, center = TRUE)
-  X_centered <- sweep(X, 2, colMeans(X), "-")
-  expect_false(centered$exact_known_mean_ure)
-  expect_equal(
-    centered$target_covariance,
-    crossprod(X_centered) / nrow(X_centered)
-  )
+  expect_true(all(is.finite(centered$covariance)))
 })
 
 test_that("transfer-learning inputs are validated", {
@@ -66,11 +64,11 @@ test_that("Frobenius distance is stable for nearly equal large matrices", {
   B[2, 1] <- 1
 
   expect_equal(
-    LDRegularization:::.ld_tl_frobenius_distance_squared(A, B),
+    LDTL:::.ld_tl_frobenius_distance_squared(A, B),
     norm(A - B, type = "F")^2
   )
   expect_equal(
-    LDRegularization:::.ld_tl_frobenius_distance_squared(A, B),
+    LDTL:::.ld_tl_frobenius_distance_squared(A, B),
     2
   )
 })
@@ -82,12 +80,12 @@ test_that("Frobenius geometry also applies to nonsymmetric matrices", {
   inner_product <- sum(diag(t(A) %*% B))
   expect_equal(inner_product, sum(A * B))
   expect_equal(
-    LDRegularization:::.ld_tl_frobenius_distance_squared(A, B),
+    LDTL:::.ld_tl_frobenius_distance_squared(A, B),
     sum((A - B)^2)
   )
 })
 
-test_that("source_moments_method matches direct known-mean calculations", {
+test_that("source_moments matches direct known-mean calculations", {
   X_source <- cbind(
     c(2, -2, 1, -1, 0),
     c(1, 1, -1, -1, 0),
@@ -101,19 +99,19 @@ test_that("source_moments_method matches direct known-mean calculations", {
     (expected_fourth - n * sum(expected_covariance^2)) /
     (n * (n - 1))
 
-  fit <- source_moments_method(
+  fit <- source_moments(
     X_source,
     center = FALSE,
     block_size = 2,
     n_threads = 2
   )
 
-  expect_s3_class(fit, "ld_source_moments")
-  expect_equal(fit$covariance, expected_covariance, tolerance = 1e-14)
+  expect_s3_class(fit, "ldtl_source_moments")
+  expect_equal(fit$R_source, expected_covariance, tolerance = 1e-14)
   expect_equal(fit$fourth_sum, expected_fourth, tolerance = 1e-14)
   expect_equal(fit$variance, expected_variance, tolerance = 1e-14)
   expect_true(fit$exact_known_mean_moments)
-  expect_identical(fit$normalization, "1/n")
+  expect_equal(fit$n_source, n)
 })
 
 test_that("source moment blocks support integer data, centering, and cached S0", {
@@ -124,22 +122,22 @@ test_that("source moment blocks support integer data, centering, and cached S0",
   centered <- sweep(X_source, 2, colMeans(X_source), "-")
   S_source <- crossprod(centered) / nrow(centered)
 
-  computed <- source_moments_method(
+  computed <- source_moments(
     X_source,
     center = TRUE,
     block_size = 1,
     n_threads = 1
   )
-  cached <- source_moments_method(
+  cached <- source_moments(
     X_source,
-    S_source = S_source,
+    R_source = S_source,
     center = TRUE,
     block_size = 3,
     n_threads = 2
   )
 
-  expect_equal(computed$covariance, S_source, tolerance = 1e-14)
-  expect_equal(cached$covariance, S_source, tolerance = 1e-14)
+  expect_equal(computed$R_source, S_source, tolerance = 1e-14)
+  expect_equal(cached$R_source, S_source, tolerance = 1e-14)
   expect_equal(computed$fourth_sum, cached$fourth_sum, tolerance = 1e-14)
   expect_equal(computed$variance, cached$variance, tolerance = 1e-14)
   expect_true(computed$covariance_computed)
@@ -156,16 +154,16 @@ test_that("cov_tl selects its finite-source branch from the source input", {
     c(2.2, -2.1, 0.8, -0.9, 0.1, -0.1),
     c(0.8, 1.2, -1.1, -0.9, 0.2, -0.2)
   )
-  source_fit <- source_moments_method(
+  source_fit <- source_moments(
     X_source,
     center = FALSE,
     block_size = 2
   )
-  target <- LDRegularization:::.ld_tl_target_moments(
+  target <- LDTL:::.ld_tl_target_moments(
     X_target,
     center = FALSE
   )
-  distance <- sum((source_fit$covariance - target$covariance)^2)
+  distance <- sum((source_fit$R_source - target$covariance)^2)
   expected_denominator <- max(
     target$variance + source_fit$variance,
     distance
@@ -178,43 +176,47 @@ test_that("cov_tl selects its finite-source branch from the source input", {
   )
   summary_only <- cov_tl(
     X_target,
-    source_fit$covariance,
+    source_fit$R_source,
     center = FALSE
   )
-  legacy <- LDRegularization:::cov_tl1(
-    X_target,
-    source_fit$covariance,
-    center = FALSE
-  )
-
   expect_s3_class(finite_source, "cov_tl")
   expect_identical(finite_source$weight_method, "finite_source")
   expect_equal(finite_source$denominator, expected_denominator)
   expect_equal(finite_source$lambda, target$variance / expected_denominator)
   expect_identical(summary_only$weight_method, "summary_only_ure")
-  expect_equal(summary_only$lambda, legacy$lambda)
-  expect_s3_class(legacy, "cov_tl1")
+  expect_equal(
+    summary_only$lambda,
+    min(target$variance / distance, 1)
+  )
 })
 
 test_that("source moment inputs reject missing and incompatible data", {
   X <- matrix(1:12, 4, 3)
   X[2, 2] <- NA
-  expect_error(source_moments_method(X), "finite values")
+  expect_error(source_moments(X), "finite values")
   expect_error(
-    source_moments_method(matrix(1:12, 4, 3), S_source = diag(2)),
+    source_moments(matrix(1:12, 4, 3), R_source = diag(2)),
     "same number of variables"
   )
 })
 
 test_that("deprecated transfer names are not exported", {
-  exports <- getNamespaceExports("LDRegularization")
+  exports <- getNamespaceExports("LDTL")
 
   expect_false("cov_tl1" %in% exports)
   expect_false("eigspac_tl" %in% exports)
   expect_false("path_tpca_max_score" %in% exports)
   expect_false("path_tpca_one_se" %in% exports)
   expect_true("eigen_tl" %in% exports)
-  expect_true("multi_source_tl" %in% exports)
+  expect_true("cov_tl" %in% exports)
+  expect_true("multisource_cov_tl" %in% exports)
+  expect_true("multisource_eigen_tl" %in% exports)
+  expect_true("source_moments" %in% exports)
+  expect_true("source_moments_plink" %in% exports)
+  expect_false("multi_source_tl" %in% exports)
+  expect_false("multi_source_eigen_tl" %in% exports)
+  expect_false("source_moments_method" %in% exports)
+  expect_false("source_moments_raw" %in% exports)
 })
 
 test_that("EigenTL min path uses fold-adjusted effective source sizes", {
@@ -242,7 +244,6 @@ test_that("EigenTL min path uses fold-adjusted effective source sizes", {
   )
 
   expect_s3_class(fit, "eigen_tl")
-  expect_identical(fit$method, "min")
   expect_equal(fit$selected_index, which.max(fit$mean_scores))
   expect_equal(fit$selected_zeta, zeta[fit$selected_index])
   expect_equal(fit$fold_weights[, 1], rep(0, 3))
@@ -255,7 +256,11 @@ test_that("EigenTL min path uses fold-adjusted effective source sizes", {
   expect_equal(sum(diag(fit$projector)), 1, tolerance = 1e-10)
   expect_equal(fit$projector %*% fit$projector, fit$projector,
                tolerance = 1e-10)
-  expect_false(fit$source_fourth_moment_used)
+  expect_null(fit$target_covariance)
+  expect_null(fit$source_covariance)
+  expect_null(fit$n_target)
+  expect_null(fit$n_source)
+  expect_null(fit$center)
   expect_equal(
     fit$reconstruction_gain,
     fit$selected_score - fit$target_score
@@ -287,7 +292,7 @@ test_that("Teacher-B paired one-SE rule matches its individual score formula", {
     c(0.2, 0.7),
     c(-0.3, -0.6)
   )
-  source_fit <- source_moments_method(
+  source_fit <- source_moments(
     X_source,
     center = FALSE,
     block_size = 3
@@ -323,14 +328,11 @@ test_that("Teacher-B paired one-SE rule matches its individual score formula", {
   )
 
   expect_s3_class(one_se, "eigen_tl")
-  expect_identical(one_se$method, "one_se")
   expect_equal(one_se$observation_scores, min_fit$observation_scores)
   expect_equal(one_se$paired_standard_errors, expected_se)
   expect_equal(one_se$competitive_set, expected_competitive)
   expect_equal(one_se$selected_index, max(expected_competitive))
   expect_gte(one_se$selected_index, one_se$best_index)
-  expect_equal(one_se$n_source, nrow(X_source))
-  expect_false(one_se$source_fourth_moment_used)
   expect_error(
     eigen_tl(
       X_target,
@@ -377,65 +379,56 @@ test_that("EigenTL inputs enforce the proposed grid and fold rules", {
   )
 })
 
-test_that("multi_source_tl solves the joint CovTL regression", {
+test_that("multisource_cov_tl solves the joint CovTL regression", {
+  X <- matrix(0, 6, 3)
+  X[cbind(seq_len(6), rep(seq_len(3), each = 2))] <-
+    rep(c(sqrt(6), -sqrt(6)), 3)
   target <- 2 * diag(3)
   directions <- list(
-    EUR = diag(c(1, 0, 0)),
-    AFR = diag(c(0, 1, 0)),
-    AMR = diag(c(0, 0, 1))
+    EUR = diag(c(5, 0, 0)),
+    AFR = diag(c(0, 5, 0)),
+    AMR = diag(c(0, 0, 5))
   )
-  fits <- lapply(directions, function(direction) {
-    structure(
-      list(
-        covariance = target,
-        lambda = 0,
-        target_covariance = target,
-        source_covariance = target + direction,
-        target_variance = 0.2,
-        source_variance = NA_real_
-      ),
-      class = "cov_tl"
-    )
-  })
+  sources <- lapply(directions, function(direction) target + direction)
 
-  fit <- multi_source_tl(fits)
-  expected_weights <- c(EUR = 0.2, AFR = 0.2, AMR = 0.2)
-  expected_covariance <- 0.4 * target
-  for (source_name in names(fits)) {
+  fit <- multisource_cov_tl(X, sources, center = FALSE)
+  expected_weights <- rep(fit$target_variance / 25, 3)
+  names(expected_weights) <- names(sources)
+  expected_covariance <-
+    (1 - sum(expected_weights)) * target
+  for (source_name in names(sources)) {
     expected_covariance <- expected_covariance +
-      expected_weights[source_name] * fits[[source_name]]$source_covariance
+      expected_weights[source_name] * sources[[source_name]]
   }
 
-  expect_s3_class(fit, "multi_source_tl")
-  expect_identical(fit$aggregation, "joint_multi_target_ure")
-  expect_equal(unname(fit$gram), diag(3))
+  expect_s3_class(fit, "multisource_cov_tl")
+  expect_equal(unname(fit$gram), 25 * diag(3))
   expect_equal(fit$source_weights, expected_weights)
-  expect_equal(fit$target_weight, 0.4)
+  expect_equal(fit$target_weight, 1 - sum(expected_weights))
   expect_equal(fit$covariance, expected_covariance)
   expect_equal(
     fit$target_weight + sum(fit$source_weights),
     1
   )
+  expect_null(fit$target_covariance)
+  expect_null(fit$source_covariance)
+  expect_null(fit$source_covariances)
+  expect_null(fit$sources)
+  expect_null(fit$n_target)
+  expect_null(fit$n_source)
+  expect_null(fit$center)
 })
 
-test_that("multi_source_tl handles the simplex boundary and singular Gram", {
+test_that("multisource_cov_tl handles the simplex boundary and singular Gram", {
+  X <- rbind(c(2, 0), c(-2, 0), c(0, 2), c(0, -2))
   target <- 2 * diag(2)
   direction <- diag(c(0.5, 0))
-  fits <- lapply(c(EUR = 1, AFR = 1, AMR = 1), function(unused) {
-    structure(
-      list(
-        covariance = target,
-        lambda = 0,
-        target_covariance = target,
-        source_covariance = target + direction,
-        target_variance = 0.6,
-        source_variance = NA_real_
-      ),
-      class = "cov_tl"
-    )
-  })
+  sources <- lapply(
+    c(EUR = 1, AFR = 1, AMR = 1),
+    function(unused) target + direction
+  )
 
-  fit <- multi_source_tl(fits)
+  fit <- multisource_cov_tl(X, sources, center = FALSE)
 
   expect_equal(sum(fit$source_weights), 1)
   expect_true(all(fit$source_weights >= 0))
@@ -443,49 +436,211 @@ test_that("multi_source_tl handles the simplex boundary and singular Gram", {
   expect_equal(fit$covariance, target + direction)
 })
 
-test_that("multi_source_tl keeps source variance as a diagnostic", {
-  target <- diag(2)
-  fits <- lapply(c(EUR = 0.1, AFR = 0.2), function(source_variance) {
+test_that("multisource_cov_tl accepts legacy source moments without retaining them", {
+  X <- rbind(
+    c(2, 0), c(-2, 0), c(0, 2), c(0, -2), c(1, 1), c(-1, -1)
+  )
+  target <- crossprod(X) / nrow(X)
+  values <- list(
+    EUR = c(variance = 0.1, fourth_sum = 101, n = 100),
+    AFR = c(variance = 0.2, fourth_sum = 202, n = 200)
+  )
+  sources <- lapply(values, function(value) {
     structure(
       list(
         covariance = target,
-        lambda = 0,
-        target_covariance = target,
-        source_covariance = target,
-        target_variance = 0.3,
-        source_variance = source_variance
+        variance = unname(value["variance"]),
+        fourth_sum = unname(value["fourth_sum"]),
+        n = unname(value["n"]),
+        p = 2,
+        exact_known_mean_moments = TRUE
       ),
-      class = "cov_tl"
+      class = "ld_source_moments"
     )
   })
 
-  fit <- multi_source_tl(fits)
+  fit <- multisource_cov_tl(X, sources, center = FALSE)
 
   expect_equal(diag(fit$gram), c(EUR = 0, AFR = 0))
-  expect_equal(fit$source_variance, c(EUR = 0.1, AFR = 0.2))
+  expect_null(fit$source_variance)
+  expect_null(fit$source_fourth_sum)
+  expect_null(fit$n_source)
+  expect_null(fit$sources)
 })
 
-test_that("multi_source_tl rejects incompatible and EigenTL fits", {
+test_that("multisource_cov_tl rejects incompatible source summaries and fits", {
   X <- matrix(rnorm(24), 12, 2)
   cov_fit <- cov_tl(X, diag(2))
-  eigen_fit <- eigen_tl(
+
+  expect_error(
+    multisource_cov_tl(X, list(EUR = diag(2), AFR = diag(3))),
+    "same number of variables"
+  )
+  expect_error(
+    multisource_cov_tl(X, list(EUR = cov_fit, AFR = diag(2))),
+    "not fitted transfer-learning objects"
+  )
+})
+
+test_that("multi-source composition recovers an exact convex source mixture", {
+  S1 <- diag(c(4, 1, 2))
+  S2 <- diag(c(1, 4, 2))
+  S3 <- diag(c(7, 7, 1))
+  T <- 0.4 * S1 + 0.6 * S2
+  sources <- list(S1 = S1, S2 = S2, S3 = S3)
+  A <- LDTL:::cpp_multi_source_gram(T, sources)
+
+  fit <- LDTL:::.ld_multi_source_composition_qp(A)
+  R <- LDTL:::cpp_multi_source_combine(
+    T,
+    sources,
+    fit$coefficients
+  )
+
+  expect_equal(fit$coefficients, c(0.4, 0.6, 0), tolerance = 1e-10)
+  expect_equal(sum(fit$coefficients), 1)
+  expect_equal(R, T, tolerance = 1e-10)
+  expect_equal(fit$objective, 0, tolerance = 1e-10)
+})
+
+test_that("multi-source EigenTL relearns target moments and direction by fold", {
+  X <- rbind(
+    c(2.0, 0.1, 0.0),
+    c(-1.8, -0.2, 0.1),
+    c(1.2, 0.9, -0.1),
+    c(-1.0, -1.1, 0.2),
+    c(0.3, -0.8, 1.2),
+    c(-0.4, 0.7, -1.0),
+    c(1.5, 0.2, 0.3),
+    c(-1.3, -0.1, -0.4),
+    c(0.2, 1.4, 0.5)
+  )
+  sources <- list(
+    EUR = diag(c(3.0, 0.8, 0.5)),
+    AFR = diag(c(0.8, 3.0, 0.5)),
+    AMR = matrix(c(2.0, 0.4, 0.0, 0.4, 2.0, 0.0, 0.0, 0.0, 0.7), 3)
+  )
+  fold_id <- rep(1:3, 3)
+  weights <- c(0, 0.5, 1)
+
+  fit <- multisource_eigen_tl(
     X,
-    diag(2),
+    sources,
     rank = 1,
-    n_source = 20,
-    fold_id = rep(1:3, 4)
+    transfer_weight_grid = weights,
+    center = FALSE,
+    fold_id = fold_id,
+    method = "min"
+  )
+  cov_fit <- multisource_cov_tl(X, sources, center = FALSE)
+
+  expected_variances <- numeric(3)
+  expected_fold_weights <- matrix(NA_real_, 3, 3)
+  expected_covtl_weights <- matrix(NA_real_, 3, 3)
+  for (v in 1:3) {
+    X_fit <- X[fold_id != v, , drop = FALSE]
+    target <- LDTL:::.ld_tl_target_moments(
+      X_fit,
+      center = FALSE
+    )
+    A <- LDTL:::cpp_multi_source_gram(
+      target$covariance,
+      sources
+    )
+    direction <- LDTL:::.ld_multi_source_composition_qp(A)
+    covtl <- LDTL:::.ld_multi_source_qp(
+      A,
+      rep(target$variance, 3)
+    )
+    expected_variances[v] <- target$variance
+    expected_fold_weights[v, ] <- direction$coefficients
+    expected_covtl_weights[v, ] <- covtl$coefficients
+  }
+
+  expect_s3_class(fit, "multisource_eigen_tl")
+  expect_s3_class(fit, "eigen_tl")
+  expect_equal(fit$path_weights, weights)
+  expect_equal(fit$fold_target_variances, expected_variances)
+  expect_equal(unname(fit$fold_source_weights), expected_fold_weights)
+  expect_equal(
+    unname(fit$fold_covtl_source_weights),
+    expected_covtl_weights
+  )
+  expect_equal(
+    fit$fold_covtl_transfer_weights,
+    rowSums(expected_covtl_weights)
+  )
+  expect_equal(unname(rowSums(fit$fold_source_weights)), rep(1, 3))
+  expect_equal(sum(fit$source_weights), 1)
+  expect_true(all(fit$source_weights >= 0))
+  expect_equal(fit$selected_index, which.max(fit$mean_scores))
+  expect_equal(fit$selected_weight, weights[fit$selected_index])
+  target_full <- crossprod(X) / nrow(X)
+  source_full <- matrix(0, ncol(X), ncol(X))
+  for (s in seq_along(sources)) {
+    source_full <- source_full + fit$source_weights[s] * sources[[s]]
+  }
+  expect_equal(
+    fit$covariance,
+    (1 - fit$selected_weight) * target_full +
+      fit$selected_weight * source_full
+  )
+  expect_equal(fit$covtl_covariance, cov_fit$covariance)
+  expect_equal(fit$covtl_source_weights, cov_fit$source_weights)
+  expect_equal(
+    unname(fit$covtl_source_weights / fit$covtl_transfer_weight),
+    unname(fit$source_weights),
+    tolerance = 1e-10
+  )
+  expect_equal(sum(diag(fit$projector)), 1, tolerance = 1e-10)
+  expect_equal(
+    fit$projector %*% fit$projector,
+    fit$projector,
+    tolerance = 1e-10
+  )
+  expect_null(fit$target_covariance)
+  expect_null(fit$source_covariance)
+  expect_null(fit$source_covariances)
+  expect_null(fit$sources)
+  expect_null(fit$n_target)
+  expect_null(fit$n_source)
+  expect_null(fit$center)
+})
+
+test_that("multi-source EigenTL one-SE and min share held-out paths", {
+  X <- rbind(
+    c(2.0, 0.1), c(-1.8, -0.2), c(1.1, 0.8),
+    c(-0.9, -1.0), c(0.4, -0.7), c(-0.5, 0.6)
+  )
+  sources <- list(
+    EUR = diag(c(3.0, 0.5)),
+    AFR = diag(c(0.5, 3.0)),
+    AMR = matrix(c(2, 0.4, 0.4, 1.5), 2)
+  )
+  fold_id <- c(1, 2, 3, 1, 2, 3)
+  weights <- c(0, 0.25, 0.5, 1)
+
+  set.seed(12)
+  min_fit <- multisource_eigen_tl(
+    X, sources, rank = 1, transfer_weight_grid = weights,
+    center = FALSE, fold_id = fold_id, method = "min"
+  )
+  set.seed(12)
+  one_se <- multisource_eigen_tl(
+    X, sources, rank = 1, transfer_weight_grid = weights,
+    center = FALSE, fold_id = fold_id, method = "one_se"
   )
 
+  expect_equal(one_se$observation_scores, min_fit$observation_scores)
+  expect_equal(one_se$fold_source_weights, min_fit$fold_source_weights)
+  expect_equal(one_se$best_index, min_fit$selected_index)
+  expect_gte(one_se$selected_index, one_se$best_index)
+  expect_equal(one_se$selected_weight, weights[one_se$selected_index])
   expect_error(
-    multi_source_tl(list(EUR = cov_fit, AFR = eigen_fit)),
-    "requires cross-source held-out path terms"
-  )
-
-  other_target <- cov_fit
-  other_target$target_covariance[1, 1] <-
-    other_target$target_covariance[1, 1] + 1
-  expect_error(
-    multi_source_tl(list(EUR = cov_fit, AFR = other_target)),
-    "same target covariance"
+    multisource_eigen_tl(
+      X, sources, rank = 1, transfer_weight_grid = c(0, 0.5),
+      fold_id = fold_id
+    ),
+    "include endpoints"
   )
 })

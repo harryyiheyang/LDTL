@@ -2,17 +2,17 @@
 # Generator token: 10BE3573-1514-4C36-9D1C-5A225CD40393
 
 cpp_multi_source_gram <- function(target, sources) {
-    .Call(`_LDRegularization_cpp_multi_source_gram`, target, sources)
+    .Call(`_LDTL_cpp_multi_source_gram`, target, sources)
 }
 
 cpp_multi_source_combine <- function(target, sources, source_weights) {
-    .Call(`_LDRegularization_cpp_multi_source_combine`, target, sources, source_weights)
+    .Call(`_LDTL_cpp_multi_source_combine`, target, sources, source_weights)
 }
 
 cpp_source_moments <- function(X_source, center, block_size, n_threads, compute_covariance) {
-    .Call(`_LDRegularization_cpp_source_moments`, X_source, center, block_size, n_threads, compute_covariance)
+    .Call(`_LDTL_cpp_source_moments`, X_source, center, block_size, n_threads, compute_covariance)
 }
 
 cpp_source_moments_raw <- function(raw_file, block_size, n_threads, compute_covariance) {
-    .Call(`_LDRegularization_cpp_source_moments_raw`, raw_file, block_size, n_threads, compute_covariance)
+    .Call(`_LDTL_cpp_source_moments_raw`, raw_file, block_size, n_threads, compute_covariance)
 }

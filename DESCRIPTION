@@ -1,18 +1,15 @@
-Package: LDRegularization
+Package: LDTL
 Type: Package
-Title: Regularization of Linkage Disequilibrium Matrix
-Version: 0.1.0
+Title: Linkage Disequilibrium Transfer Learning
+Version: 0.2.0
 Authors@R: person("Yihe", "Yang", email = "yxy1234@case.edu",
     role = c("aut", "cre"))
-Description: Provides methods for regularizing large-scale linkage
-    disequilibrium (LD) matrices. It implements a variety of
-    regularization techniques, including shrinkage, nonlinear shrinkage,
-    banding, tapering, thresholding, standard POET extensions, and
-    transfer learning for covariance matrices and eigenspaces, including
-    tuning-free joint multi-source covariance shrinkage.
-    The package enables efficient
-    computation for high-dimensional LD matrix estimation via
-    CppMatrix-backed matrix operations where possible.
+Description: Provides single-source and multi-source transfer learning for
+    linkage disequilibrium covariance matrices and eigenspaces. The package
+    includes tuning-free covariance transfer, fold-wise reconstruction-based
+    eigenspace transfer, reusable large-source moment summaries, standard
+    POET extensions, and conventional covariance regularizers. Large matrix
+    operations use CppMatrix and native streaming kernels where possible.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: 

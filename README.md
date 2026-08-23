@@ -1,222 +1,116 @@
-# LDRegularization
+# LDTL
 
-The `LDRegularization` package provides a collection of covariance and correlation matrix regularization methods, with a focus on high-dimensional settings such as linkage disequilibrium (LD) matrices in statistical genetics. The package implements sparse regularization, shrinkage, nonlinear shrinkage, and POET-style estimators.
-
-These tools help ensure positive semi-definiteness and improve estimation accuracy when working with large, noisy covariance or correlation matrices.
+`LDTL` provides single-source and multi-source transfer learning for linkage
+disequilibrium covariance matrices and eigenspaces. It also retains the
+package's POET and conventional covariance-regularization methods.
 
 ## Installation
 
-You can install the `LDRegularization` package from GitHub using the `devtools` package:
-
 ```r
-devtools::install_github("harryyiheyang/LDRegularization")
+devtools::install_github("harryyiheyang/LDTL")
+library(LDTL)
 ```
 
-## Functions
+## Core transfer-learning methods
 
-The package currently includes the following main functions:
+The four primary estimators are:
 
-- poet_thresholding: POET estimator with entrywise thresholding on the idiosyncratic covariance.
+- `cov_tl()`: tuning-free single-source covariance transfer;
+- `eigen_tl()`: single-source reconstruction-selected eigenspace path;
+- `multisource_cov_tl()`: tuning-free joint multi-source covariance transfer;
+- `multisource_eigen_tl()`: a fold-wise joint source composition followed by
+  one reconstruction-selected eigenspace path.
 
-- poet_banding: POET estimator with banding (keep entries within a fixed bandwidth).
-
-- poet_tapering: POET estimator with tapering (apply a tapering kernel depending on |i-j|).
-
-- poet_linear_shrinkage: POET estimator with linear shrinkage of the idiosyncratic covariance.
-
-- poet_nonlinear_shrinkage: POET estimator with mixed nonlinear shrinkage of
-  the idiosyncratic covariance.
-
-- thresholding: Standalone entrywise MCP thresholding for covariance/correlation matrices.
-
-- banding: Standalone banding with bandwidth `K`.
-
-- tapering: Standalone tapering with bandwidth `K`.
-
-- linear_shrinkage: Standalone linear shrinkage.
-
-- nonlinear_shrinkage: Standalone mixed nonlinear shrinkage for individual-level
-  data.
-
-- cov_tl: Tuning-free covariance transfer learning. A source covariance matrix
-  uses the summary-only URE rule; an `ld_source_moments` object automatically
-  includes finite-source noise.
-
-- source_moments_method: C++/OpenMP individual-block preprocessing of a source
-  cohort. It returns a reusable source covariance and scalar fourth-moment
-  noise estimate without retaining the source individuals.
-
-- eigen_tl: Fold-adjusted covariance-path eigenspace transfer learning. Its
-  default paired one-standard-error selector favors more transfer among
-  competitive candidates; `method = "min"` selects minimum reconstruction
-  risk.
-
-- multi_source_tl: Tuning-free joint multi-target CovTL. It learns all source
-  coefficients together from a source-by-source Frobenius Gram matrix.
-
-Most matrix estimators accept either a precomputed matrix (`S` or `A`) or
-individual-level data `X`. Nonlinear shrinkage requires `X`. The POET functions
-use ACT factor selection by default, retain `D.ratio` as an option, and accept an
-optional reusable full eigendecomposition through `eig`.
-Sparse methods use theory-rate defaults only when the user does not supply the
-tuning parameter. Standalone thresholding uses
-`lambda = 2 * sqrt(log(p) / n)`, while POET thresholding uses
-`lambda = 2 * max(sqrt(log(p) / n), 1 / sqrt(p))`. Banding and tapering use
-`K = ceiling(n^(1 / (2 * alpha + 1)))` with `alpha = 1` by default, capped at
-`floor(p / 2)`. These defaults require `n`; otherwise pass `lambda` or `K`
-directly. Standalone and POET linear shrinkage use a Gaussian/Wishart MSE
-plug-in intensity capped at `alpha = 0.05`. Nonlinear shrinkage has
-`shrinkage = 0` by default, so scripts should set it explicitly, for example
-`shrinkage = 0.5`, when a stronger nonlinear component is desired.
-
-Sparse estimators are made positive semidefinite with fixed-support linear shrinkage, using `eig_min = 0` by default. Set a positive `eig_min` only when downstream computations require a strictly positive-definite matrix. FSPD is a final safeguard and does not choose the sparsity tuning parameter.
-
-## Dependencies
-
-The package makes use of efficient matrix operations implemented in CppMatrix, which relies on Rcpp and RcppArmadillo for performance.
-
-## Example
+Source covariance and fourth-moment summaries can be computed once and reused
+for every target population and fold:
 
 ```r
-library(LDRegularization)
+source_eur <- source_moments(X_eur)
+source_afr <- source_moments(X_afr)
+source_amr <- source_moments(X_amr)
 
-# Example: POET with thresholding
-set.seed(123)
-p <- 50
-n <- 200
-X <- matrix(rnorm(n * p), n, p)
-S <- cov(X)
-Sigma_hat <- poet_thresholding(S, n = n)
+sources <- list(EUR = source_eur, AFR = source_afr, AMR = source_amr)
 ```
 
-Closed-form transfer learning uses target individual-level data and only a
-source covariance summary. For the exact known-mean URE interpretation, the
-rows of `X_target` must be independent with a known population mean (zero in
-this example):
+For a large PLINK 2 additive raw file, use the streaming interface:
 
 ```r
-X_target <- X
-S_source <- diag(p)
-
-cov_fit <- cov_tl(X_target, S_source)
-cov_fit$lambda       # weight on the source covariance
-cov_fit$alpha        # lambda / (1 - lambda)
-Sigma_tl <- cov_fit$covariance
-
-eig_fit <- eigen_tl(
-  X_target,
-  S_source,
-  rank = 3,
-  n_source = 1000
-)
-U_tl <- eig_fit$vectors
-P_tl <- eig_fit$projector
+source_eur <- source_moments_plink("eur.raw")
 ```
 
-`eigen_tl()` uses `method = "one_se"` by default. Set `method = "min"` to
-select the raw held-out reconstruction-risk minimizer. Supply a common
-`fold_id` when comparing multiple sources.
+Both source-summary functions accept an optional precomputed `R_source`. When
+it is supplied, the source covariance is reused and only the fourth-moment
+scan is performed.
 
-When source individual-level data are available, preprocess them once and
-reuse the resulting summary across target fits:
+### Single-source covariance transfer
 
 ```r
-source_fit <- source_moments_method(
-  X_source,
-  center = FALSE,
-  block_size = NULL,  # automatic 512 MiB working-set target
-  n_threads = 20
-)
-
-cov_finite <- cov_tl(
-  X_target,
-  source_fit,
-  center = FALSE
-)
-
-eig_finite <- eigen_tl(
-  X_target,
-  source_fit,
-  rank = 3,
-  center = FALSE
-)
+fit_cov <- cov_tl(X_target, source_eur)
+R_cov <- fit_cov$covariance
+fit_cov$lambda
 ```
 
-`source_moments_method()` processes individuals in native blocks and never
-forms individual outer products. If a matching `S_source` is already
-available, pass it to the moment function; the additional source scan then
-computes only `sum_i ||X_source[i, ]||^4`, reducing the extra work to
-`O(n_source * p)`. Missing genotypes should be mean-imputed before the scan.
-The covariance output is still `p` by `p`, so variant/LD-region blocking is a
-separate requirement when `p` itself is too large.
-
-Teacher B's path-adaptive framework is the package's EigenTL implementation.
-Each grid value is an effective fraction of the available source sample. Its
-weight is adjusted separately inside every target fold, and the selected
-fraction is refitted on all target observations:
+### Single-source eigenspace transfer
 
 ```r
-fold_id <- sample(rep(1:5, length.out = nrow(X_target)))
-
-eig_min <- eigen_tl(
+fit_eigen <- eigen_tl(
   X_target,
-  source_fit,       # or S_source together with n_source
-  rank = 3,
+  source_eur,
+  rank = K99,
   fold_id = fold_id,
-  method = "min"
+  method = "one_se"
 )
-
-eig_one_se <- eigen_tl(
-  X_target,
-  source_fit,
-  rank = 3,
-  fold_id = fold_id
-)
+P_eigen <- fit_eigen$projector
 ```
 
-The path uses the source covariance and sample size, but not the fourth moment.
-A common subspace dimension should be chosen externally before comparing
-sources.
+`method = "min"` selects the maximum held-out score. The default
+`method = "one_se"` selects the most transferred statistically competitive
+candidate.
 
-Multiple source-specific fits can be aggregated without pre-mixing source
-covariances:
+### Multi-source covariance transfer
 
 ```r
-cov_fits <- list(
-  EUR = cov_tl(X_target, source_eur),
-  AFR = cov_tl(X_target, source_afr),
-  AMR = cov_tl(X_target, source_amr)
-)
-cov_multi <- multi_source_tl(cov_fits)
+fit_multi_cov <- multisource_cov_tl(X_target, sources)
+R_multi_cov <- fit_multi_cov$covariance
+fit_multi_cov$source_weights
 ```
 
-`multi_source_tl()` does not average the single-source `lambda` values or the
-already-shrunk covariance estimates. It regresses the common target covariance
-jointly toward the original source covariances, with nonnegative source
-coefficients whose sum is at most one. C++ streams the `p` by `p` matrices once
-to form a small source-by-source Gram matrix; an exact simplex-face solver in R
-then obtains the coefficients. No target split, tuning grid, or prior weights
-are used. Joint multi-source EigenTL is intentionally not inferred from a list
-of separate fits because those objects do not contain the required
-cross-source held-out path terms. The returned `selected_ure` is the minimized
-criterion, not an unbiased post-selection estimate of the fitted risk.
+The estimator solves one nonnegative joint regression with source coefficients
+summing to at most one. Source-source cross terms are retained in the small
+Gram matrix; source covariances are not pre-mixed by sample size.
 
-The transfer-learning functions prioritize `CppMatrix` for covariance
-construction, matrix products, centering, projector construction, and spectral
-decomposition. Base R is used only as a guarded fallback or for scalar
-reductions not exposed by `CppMatrix`.
+### Multi-source eigenspace transfer
 
-The source-target Frobenius distance is evaluated directly as
-`norm(S_source - S_target, "F")^2`. This avoids the cancellation that can
-occur in the algebraically equivalent expression
-`norm(S_source, "F")^2 + norm(S_target, "F")^2 -
-2 * tr(t(S_source) %*% S_target)` when the two large matrices are close.
+```r
+fit_multi_eigen <- multisource_eigen_tl(
+  X_target,
+  sources,
+  rank = K99,
+  fold_id = fold_id,
+  method = "one_se"
+)
+P_multi_eigen <- fit_multi_eigen$projector
+```
 
-## License
+Every target training fold relearns its target covariance, target variance,
+and convex source composition. The resolved source summaries are reused. A
+single direct covariance-weight path is then evaluated by held-out target
+reconstruction score, so three sources require one eigenspace path rather than
+three independent paths.
 
-This package is licensed under the MIT License.
+Fit objects retain the final learned covariance/eigenspace, weights, risks,
+scores, and small optimization diagnostics. They do not retain copies of the
+input target or source covariance matrices.
 
-## Contact
+## Additional covariance regularizers
 
-Yihe Yang
-Email: yxy1234@case.edu
+The existing methods remain available:
+
+- `linear_shrinkage()` and `nonlinear_shrinkage()`;
+- `banding()`, `tapering()`, and `thresholding()`;
+- `poet_linear_shrinkage()` and `poet_nonlinear_shrinkage()`;
+- `poet_banding()`, `poet_tapering()`, and `poet_thresholding()`.
+
+Matrix multiplication, eigendecomposition, and covariance construction prefer
+`CppMatrix`. Source summaries and multi-source Gram matrices use native
+streaming kernels to avoid unnecessary large intermediate matrices.

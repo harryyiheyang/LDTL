@@ -112,7 +112,10 @@ multisource_cov_tl <- function(X_target, sources, center = TRUE) {
 #'   rows.
 #' @param sources Named list of at least two `ldtl_source_moments` objects or
 #'   source covariance matrices.
-#' @param rank Number of leading eigenvectors.
+#' @param rank Eigenspace size. A number strictly between zero and one is the
+#'   target cumulative explained-variance threshold, computed separately from
+#'   each target training fold and from the full target data. A positive
+#'   integer is a fixed rank shared by all fits.
 #' @param folds Number of target validation folds.
 #' @param transfer_weight_grid Strictly increasing direct covariance weights in
 #'   `[0, 1]`, including zero and one.
@@ -158,7 +161,7 @@ multisource_eigen_tl <- function(
   }
   n_target <- nrow(X_target)
   p <- ncol(X_target)
-  rank <- .ld_tl_rank(rank, p)
+  rank_spec <- .ld_tl_rank_spec(rank, p)
   resolved_sources <- .ld_multi_source_resolve(sources, p)
   source_names <- resolved_sources$source_names
   source_covariances <- resolved_sources$covariances
@@ -185,6 +188,7 @@ multisource_eigen_tl <- function(
   )
   fold_covtl_transfer_weights <- numeric(n_folds)
   fold_grams <- vector("list", n_folds)
+  fold_effective_ranks <- integer(n_folds)
 
   for (fold_index in seq_along(fold_levels)) {
     validation_indices <- which(fold_id == fold_levels[fold_index])
@@ -203,6 +207,13 @@ multisource_eigen_tl <- function(
       X_validation <- sweep(X_validation, 2L, training_mean, "-")
     }
     target_fit <- .ld_tl_target_moments(X_fit, center = FALSE)
+    target_eig <- .ld_eigen(target_fit$covariance)
+    fold_rank <- .ld_tl_effective_rank(
+      rank_spec,
+      target_eig$values,
+      p
+    )
+    fold_effective_ranks[fold_index] <- fold_rank
     gram <- cpp_multi_source_gram(
       target_fit$covariance,
       source_covariances
@@ -232,9 +243,13 @@ multisource_eigen_tl <- function(
         (1 - weight) * target_fit$covariance +
           weight * source_covariance
       )
-      candidate_eig <- .ld_eigen(candidate_covariance)
+      candidate_eig <- if (candidate_index == 1L) {
+        target_eig
+      } else {
+        .ld_eigen(candidate_covariance)
+      }
       candidate_vectors <-
-        candidate_eig$vectors[, seq_len(rank), drop = FALSE]
+        candidate_eig$vectors[, seq_len(fold_rank), drop = FALSE]
       validation_projection <- .ld_matrix_multiply(
         X_validation,
         candidate_vectors
@@ -259,6 +274,17 @@ multisource_eigen_tl <- function(
     X_full <- X_target
   }
   target_full <- .ld_tl_target_moments(X_full, center = FALSE)
+  target_eig <- NULL
+  if (rank_spec$type == "fixed") {
+    effective_rank <- rank_spec$value
+  } else {
+    target_eig <- .ld_eigen(target_full$covariance)
+    effective_rank <- .ld_tl_effective_rank(
+      rank_spec,
+      target_eig$values,
+      p
+    )
+  }
   full_gram <- cpp_multi_source_gram(
     target_full$covariance,
     source_covariances
@@ -275,8 +301,12 @@ multisource_eigen_tl <- function(
     (1 - selected_weight) * target_full$covariance +
       selected_weight * full_source_covariance
   )
-  fit_eig <- .ld_eigen(covariance)
-  vectors <- fit_eig$vectors[, seq_len(rank), drop = FALSE]
+  fit_eig <- if (selection$selected_index == 1L && !is.null(target_eig)) {
+    target_eig
+  } else {
+    .ld_eigen(covariance)
+  }
+  vectors <- fit_eig$vectors[, seq_len(effective_rank), drop = FALSE]
   projector <- .ld_symmetrize(
     .ld_matrix_multiply(vectors, vectors, transB = TRUE)
   )
@@ -301,7 +331,9 @@ multisource_eigen_tl <- function(
       covariance = covariance,
       vectors = vectors,
       projector = projector,
-      eigenvalues = fit_eig$values[seq_len(rank)],
+      eigenvalues = fit_eig$values[seq_len(effective_rank)],
+      effective_rank = effective_rank,
+      fold_effective_ranks = fold_effective_ranks,
       selected_index = selection$selected_index,
       selected_weight = selected_weight,
       best_index = selection$best_index,

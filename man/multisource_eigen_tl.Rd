@@ -23,7 +23,10 @@ rows.}
 \item{sources}{Named list of at least two `ldtl_source_moments` objects or
 source covariance matrices.}
 
-\item{rank}{Number of leading eigenvectors.}
+\item{rank}{Eigenspace size. A number strictly between zero and one is the
+target cumulative explained-variance threshold, computed separately from
+each target training fold and from the full target data. A positive
+integer is a fixed rank shared by all fits.}
 
 \item{folds}{Number of target validation folds.}
 

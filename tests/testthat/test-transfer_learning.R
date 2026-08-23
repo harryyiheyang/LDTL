@@ -49,12 +49,53 @@ test_that("transfer-learning inputs are validated", {
   expect_error(cov_tl(X, diag(3)), "same number of variables")
   expect_error(
     eigen_tl(X, diag(2), rank = 0, n_source = 20),
-    "rank must be between"
+    "positive integer"
+  )
+  expect_error(
+    eigen_tl(X, diag(2), rank = 1.5, n_source = 20),
+    "fixed rank must be an integer"
   )
   expect_error(
     eigen_tl(X, diag(2), rank = 1, n_source = 20, method = "median"),
     "arg"
   )
+})
+
+test_that("EigenTL rank accepts a fixed dimension or target variance fraction", {
+  X <- rbind(
+    c(4, 0.2, 0.1), c(-4, -0.2, -0.1),
+    c(3, 0.1, 0), c(-3, -0.1, 0),
+    c(2, 0, 0.1), c(-2, 0, -0.1)
+  )
+  fold_id <- rep(1:3, each = 2)
+  source <- diag(c(10, 1, 0.5))
+  sources <- list(
+    EUR = source,
+    AFR = diag(c(8, 1.2, 0.7))
+  )
+
+  fixed <- eigen_tl(
+    X, source, rank = 2, n_source = 20,
+    fold_id = fold_id, center = FALSE, method = "min"
+  )
+  fractional <- eigen_tl(
+    X, source, rank = 0.8, n_source = 20,
+    fold_id = fold_id, center = FALSE, method = "min"
+  )
+  multi_fractional <- multisource_eigen_tl(
+    X, sources, rank = 0.8,
+    fold_id = fold_id, center = FALSE, method = "min"
+  )
+
+  expect_equal(fixed$effective_rank, 2L)
+  expect_equal(fixed$fold_effective_ranks, rep(2L, 3))
+  expect_equal(ncol(fixed$vectors), 2L)
+  expect_equal(fractional$effective_rank, 1L)
+  expect_equal(fractional$fold_effective_ranks, rep(1L, 3))
+  expect_equal(ncol(fractional$vectors), 1L)
+  expect_equal(multi_fractional$effective_rank, 1L)
+  expect_equal(multi_fractional$fold_effective_ranks, rep(1L, 3))
+  expect_equal(ncol(multi_fractional$vectors), 1L)
 })
 
 test_that("Frobenius distance is stable for nearly equal large matrices", {

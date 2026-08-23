@@ -22,7 +22,10 @@ eigen_tl(
 
 \item{source}{An `ldtl_source_moments` object or a source covariance matrix.}
 
-\item{rank}{Number of leading target eigenvectors.}
+\item{rank}{Eigenspace size. A number strictly between zero and one is the
+target cumulative explained-variance threshold, computed separately from
+each target training fold and from the full target data. A positive
+integer is a fixed rank shared by all fits.}
 
 \item{n_source}{Source sample size. Required when `source` is a matrix and
 checked against the stored sample size when source moments are supplied.}

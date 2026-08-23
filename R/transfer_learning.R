@@ -273,7 +273,10 @@ cov_tl <- function(X_target, source, center = TRUE) {
 #'
 #' @param X_target Target individual-level data matrix.
 #' @param source An `ldtl_source_moments` object or a source covariance matrix.
-#' @param rank Number of leading target eigenvectors.
+#' @param rank Eigenspace size. A number strictly between zero and one is the
+#'   target cumulative explained-variance threshold, computed separately from
+#'   each target training fold and from the full target data. A positive
+#'   integer is a fixed rank shared by all fits.
 #' @param n_source Source sample size. Required when `source` is a matrix and
 #'   checked against the stored sample size when source moments are supplied.
 #' @param folds Number of target validation folds.
@@ -347,7 +350,7 @@ eigen_tl <- function(
   }
   n_target <- nrow(X_target)
   p <- ncol(X_target)
-  rank <- .ld_tl_rank(rank, p)
+  rank_spec <- .ld_tl_rank_spec(rank, p)
   source_resolved <- .ld_tl_resolve_source(source, p)
   n_source <- .ld_path_source_size(source_resolved, n_source)
   zeta <- .ld_path_source_fraction_grid(source_fraction_grid)
@@ -360,6 +363,7 @@ eigen_tl <- function(
     nrow = length(fold_levels),
     ncol = n_candidates
   )
+  fold_effective_ranks <- integer(length(fold_levels))
 
   for (fold_index in seq_along(fold_levels)) {
     validation_indices <- which(fold_id == fold_levels[fold_index])
@@ -378,6 +382,9 @@ eigen_tl <- function(
     S_fit <- .ld_symmetrize(
       .ld_matrix_multiply(X_fit, X_fit, transA = TRUE) / n_fit
     )
+    target_eig <- .ld_eigen(S_fit)
+    fold_rank <- .ld_tl_effective_rank(rank_spec, target_eig$values, p)
+    fold_effective_ranks[fold_index] <- fold_rank
     weights <- .ld_path_weights(zeta, n_fit, n_source)
     fold_weights[fold_index, ] <- weights
 
@@ -386,9 +393,13 @@ eigen_tl <- function(
         (1 - weights[candidate_index]) * S_fit +
           weights[candidate_index] * source_resolved$covariance
       )
-      candidate_eig <- .ld_eigen(candidate_covariance)
+      candidate_eig <- if (candidate_index == 1L) {
+        target_eig
+      } else {
+        .ld_eigen(candidate_covariance)
+      }
       candidate_vectors <-
-        candidate_eig$vectors[, seq_len(rank), drop = FALSE]
+        candidate_eig$vectors[, seq_len(fold_rank), drop = FALSE]
       validation_projection <- .ld_matrix_multiply(
         X_validation,
         candidate_vectors
@@ -441,14 +452,29 @@ eigen_tl <- function(
   target_covariance <- .ld_symmetrize(
     .ld_matrix_multiply(X_full, X_full, transA = TRUE) / n_target
   )
+  target_eig <- NULL
+  if (rank_spec$type == "fixed") {
+    effective_rank <- rank_spec$value
+  } else {
+    target_eig <- .ld_eigen(target_covariance)
+    effective_rank <- .ld_tl_effective_rank(
+      rank_spec,
+      target_eig$values,
+      p
+    )
+  }
   full_weights <- .ld_path_weights(zeta, n_target, n_source)
   selected_weight <- full_weights[selected_index]
   covariance <- .ld_symmetrize(
     (1 - selected_weight) * target_covariance +
       selected_weight * source_resolved$covariance
   )
-  fit_eig <- .ld_eigen(covariance)
-  vectors <- fit_eig$vectors[, seq_len(rank), drop = FALSE]
+  fit_eig <- if (selected_index == 1L && !is.null(target_eig)) {
+    target_eig
+  } else {
+    .ld_eigen(covariance)
+  }
+  vectors <- fit_eig$vectors[, seq_len(effective_rank), drop = FALSE]
   projector <- .ld_symmetrize(
     .ld_matrix_multiply(vectors, vectors, transB = TRUE)
   )
@@ -461,7 +487,9 @@ eigen_tl <- function(
       covariance = covariance,
       vectors = vectors,
       projector = projector,
-      eigenvalues = fit_eig$values[seq_len(rank)],
+      eigenvalues = fit_eig$values[seq_len(effective_rank)],
+      effective_rank = effective_rank,
+      fold_effective_ranks = fold_effective_ranks,
       selected_index = selected_index,
       selected_zeta = zeta[selected_index],
       selected_weight = selected_weight,
@@ -686,13 +714,43 @@ eigen_tl <- function(
   list(lambda = lambda, alpha = alpha)
 }
 
-.ld_tl_rank <- function(rank, p) {
-  if (length(rank) != 1L || !is.finite(rank) || rank != round(rank)) {
-    stop("rank must be a single integer.", call. = FALSE)
+.ld_tl_rank_spec <- function(rank, p) {
+  if (length(rank) != 1L || !is.numeric(rank) || !is.finite(rank) || rank <= 0) {
+    stop(
+      "rank must be a positive integer or a number strictly between 0 and 1.",
+      call. = FALSE
+    )
   }
-  rank <- as.integer(rank)
-  if (rank < 1L || rank >= p) {
-    stop("rank must be between 1 and ncol(X_target) - 1.", call. = FALSE)
+  if (rank < 1) {
+    return(list(type = "fraction", value = as.double(rank)))
   }
-  rank
+  if (rank != round(rank) || rank >= p) {
+    stop(
+      "A fixed rank must be an integer between 1 and ncol(X_target) - 1.",
+      call. = FALSE
+    )
+  }
+  list(type = "fixed", value = as.integer(rank))
+}
+
+.ld_tl_effective_rank <- function(rank_spec, eigenvalues, p) {
+  if (rank_spec$type == "fixed") {
+    return(rank_spec$value)
+  }
+  mass <- pmax(as.numeric(eigenvalues), 0)
+  total <- sum(mass)
+  if (!is.finite(total) || total <= 0) {
+    stop(
+      "A cumulative rank requires positive target covariance variation.",
+      call. = FALSE
+    )
+  }
+  effective_rank <- which(cumsum(mass) / total >= rank_spec$value)[1L]
+  if (!length(effective_rank) || effective_rank >= p) {
+    stop(
+      "The cumulative rank reaches the full variable dimension; use a smaller rank threshold.",
+      call. = FALSE
+    )
+  }
+  as.integer(effective_rank)
 }

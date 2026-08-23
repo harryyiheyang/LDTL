@@ -56,12 +56,18 @@ fit_cov$lambda
 fit_eigen <- eigen_tl(
   X_target,
   source_eur,
-  rank = K99,
+  rank = 0.99,
   fold_id = fold_id,
   method = "one_se"
 )
 P_eigen <- fit_eigen$projector
 ```
+
+Set `rank` to a positive integer for a fixed eigenspace dimension, or to a
+number strictly between zero and one for a target cumulative explained-variance
+threshold. For example, `rank = 0.99` learns K99 from each target training fold
+and again from the full target data; every source/path candidate within a fold
+uses the same learned rank.
 
 `method = "min"` selects the maximum held-out score. The default
 `method = "one_se"` selects the most transferred statistically competitive
@@ -85,7 +91,7 @@ Gram matrix; source covariances are not pre-mixed by sample size.
 fit_multi_eigen <- multisource_eigen_tl(
   X_target,
   sources,
-  rank = K99,
+  rank = 0.99,
   fold_id = fold_id,
   method = "one_se"
 )

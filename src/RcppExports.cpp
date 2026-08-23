@@ -11,6 +11,31 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// cpp_multi_source_gram
+NumericMatrix cpp_multi_source_gram(const NumericMatrix target, const List sources);
+RcppExport SEXP _LDRegularization_cpp_multi_source_gram(SEXP targetSEXP, SEXP sourcesSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const NumericMatrix >::type target(targetSEXP);
+    Rcpp::traits::input_parameter< const List >::type sources(sourcesSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_multi_source_gram(target, sources));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_multi_source_combine
+NumericMatrix cpp_multi_source_combine(const NumericMatrix target, const List sources, const NumericVector source_weights);
+RcppExport SEXP _LDRegularization_cpp_multi_source_combine(SEXP targetSEXP, SEXP sourcesSEXP, SEXP source_weightsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const NumericMatrix >::type target(targetSEXP);
+    Rcpp::traits::input_parameter< const List >::type sources(sourcesSEXP);
+    Rcpp::traits::input_parameter< const NumericVector >::type source_weights(source_weightsSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_multi_source_combine(target, sources, source_weights));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_source_moments
 List cpp_source_moments(SEXP X_source, const bool center, const int block_size, const int n_threads, const bool compute_covariance);
 RcppExport SEXP _LDRegularization_cpp_source_moments(SEXP X_sourceSEXP, SEXP centerSEXP, SEXP block_sizeSEXP, SEXP n_threadsSEXP, SEXP compute_covarianceSEXP) {
@@ -42,6 +67,8 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_LDRegularization_cpp_multi_source_gram", (DL_FUNC) &_LDRegularization_cpp_multi_source_gram, 2},
+    {"_LDRegularization_cpp_multi_source_combine", (DL_FUNC) &_LDRegularization_cpp_multi_source_combine, 3},
     {"_LDRegularization_cpp_source_moments", (DL_FUNC) &_LDRegularization_cpp_source_moments, 5},
     {"_LDRegularization_cpp_source_moments_raw", (DL_FUNC) &_LDRegularization_cpp_source_moments_raw, 4},
     {NULL, NULL, 0}

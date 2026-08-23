@@ -51,8 +51,8 @@ The package currently includes the following main functions:
   competitive candidates; `method = "min"` selects minimum reconstruction
   risk.
 
-- multi_source_tl: Almost tuning-free aggregation of source-specific CovTL or
-  EigenTL fits using shrinkage gain or held-out reconstruction gain.
+- multi_source_tl: Tuning-free joint multi-target CovTL. It learns all source
+  coefficients together from a source-by-source Frobenius Gram matrix.
 
 Most matrix estimators accept either a precomputed matrix (`S` or `A`) or
 individual-level data `X`. Nonlinear shrinkage requires `X`. The POET functions
@@ -188,19 +188,18 @@ cov_fits <- list(
   AMR = cov_tl(X_target, source_amr)
 )
 cov_multi <- multi_source_tl(cov_fits)
-
-eig_fits <- list(
-  EUR = eigen_tl(X_target, source_eur, rank = 3, fold_id = fold_id),
-  AFR = eigen_tl(X_target, source_afr, rank = 3, fold_id = fold_id),
-  AMR = eigen_tl(X_target, source_amr, rank = 3, fold_id = fold_id)
-)
-eig_multi <- multi_source_tl(eig_fits)
 ```
 
-CovTL candidates are weighted by their normalized shrinkage coefficients,
-which act as plug-in single-source risk-gain scores. EigenTL candidates are
-weighted by the positive held-out reconstruction-score gain of their selected
-path points over zero transfer. Equal source priors are used by default.
+`multi_source_tl()` does not average the single-source `lambda` values or the
+already-shrunk covariance estimates. It regresses the common target covariance
+jointly toward the original source covariances, with nonnegative source
+coefficients whose sum is at most one. C++ streams the `p` by `p` matrices once
+to form a small source-by-source Gram matrix; an exact simplex-face solver in R
+then obtains the coefficients. No target split, tuning grid, or prior weights
+are used. Joint multi-source EigenTL is intentionally not inferred from a list
+of separate fits because those objects do not contain the required
+cross-source held-out path terms. The returned `selected_ure` is the minimized
+criterion, not an unbiased post-selection estimate of the fitted risk.
 
 The transfer-learning functions prioritize `CppMatrix` for covariance
 construction, matrix products, centering, projector construction, and spectral

@@ -9,7 +9,7 @@ Description: Provides methods for regularizing large-scale linkage
     regularization techniques, including shrinkage, nonlinear shrinkage,
     banding, tapering, thresholding, standard POET extensions, and
     transfer learning for covariance matrices and eigenspaces, including
-    almost tuning-free multi-source aggregation.
+    tuning-free joint multi-source covariance shrinkage.
     The package enables efficient
     computation for high-dimensional LD matrix estimation via
     CppMatrix-backed matrix operations where possible.

@@ -377,125 +377,115 @@ test_that("EigenTL inputs enforce the proposed grid and fold rules", {
   )
 })
 
-test_that("multi_source_tl uses CovTL shrinkage gains", {
-  X <- rbind(
-    c(2.0, 0.0),
-    c(-2.0, 0.0),
-    c(1.0, 1.0),
-    c(-1.0, -1.0),
-    c(0.5, -0.5),
-    c(-0.5, 0.5)
+test_that("multi_source_tl solves the joint CovTL regression", {
+  target <- 2 * diag(3)
+  directions <- list(
+    EUR = diag(c(1, 0, 0)),
+    AFR = diag(c(0, 1, 0)),
+    AMR = diag(c(0, 0, 1))
   )
-  fits <- list(
-    EUR = cov_tl(X, diag(c(3.0, 0.5)), center = FALSE),
-    AFR = cov_tl(X, diag(c(2.0, 1.0)), center = FALSE),
-    AMR = cov_tl(X, diag(c(1.5, 1.5)), center = FALSE)
-  )
+  fits <- lapply(directions, function(direction) {
+    structure(
+      list(
+        covariance = target,
+        lambda = 0,
+        target_covariance = target,
+        source_covariance = target + direction,
+        target_variance = 0.2,
+        source_variance = NA_real_
+      ),
+      class = "cov_tl"
+    )
+  })
 
   fit <- multi_source_tl(fits)
-  expected_weights <- vapply(fits, function(x) x$lambda, numeric(1))
-  expected_weights <- expected_weights / sum(expected_weights)
-  expected_covariance <- matrix(0, 2, 2)
-  for (source_index in seq_along(fits)) {
+  expected_weights <- c(EUR = 0.2, AFR = 0.2, AMR = 0.2)
+  expected_covariance <- 0.4 * target
+  for (source_name in names(fits)) {
     expected_covariance <- expected_covariance +
-      expected_weights[source_index] * fits[[source_index]]$covariance
+      expected_weights[source_name] * fits[[source_name]]$source_covariance
   }
 
   expect_s3_class(fit, "multi_source_tl")
-  expect_identical(fit$fit_family, "cov_tl")
-  expect_identical(fit$aggregation, "shrinkage_gain")
-  expect_equal(fit$weights, expected_weights)
+  expect_identical(fit$aggregation, "joint_multi_target_ure")
+  expect_equal(unname(fit$gram), diag(3))
+  expect_equal(fit$source_weights, expected_weights)
+  expect_equal(fit$target_weight, 0.4)
   expect_equal(fit$covariance, expected_covariance)
-  expect_equal(sum(fit$weights), 1)
   expect_equal(
-    fit$effective_source_weights,
-    fit$weights * vapply(fits, function(x) x$lambda, numeric(1))
-  )
-  expect_equal(
-    fit$target_weight + sum(fit$effective_source_weights),
+    fit$target_weight + sum(fit$source_weights),
     1
   )
 })
 
-test_that("multi_source_tl uses EigenTL reconstruction gains", {
-  X <- rbind(
-    c(2.0, 0.1),
-    c(-1.8, -0.2),
-    c(1.1, 0.8),
-    c(-0.9, -1.0),
-    c(0.4, -0.7),
-    c(-0.5, 0.6)
-  )
-  fold_id <- c(1, 2, 3, 1, 2, 3)
-  source <- list(
-    EUR = diag(c(3.0, 0.5)),
-    AFR = matrix(c(2.0, 0.4, 0.4, 1.0), 2, 2),
-    AMR = diag(c(1.2, 1.1))
-  )
-  fits <- lapply(source, function(S) {
-    eigen_tl(
-      X,
-      S,
-      rank = 1,
-      n_source = 20,
-      source_fraction_grid = c(0, 0.5, 1),
-      center = FALSE,
-      fold_id = fold_id
+test_that("multi_source_tl handles the simplex boundary and singular Gram", {
+  target <- 2 * diag(2)
+  direction <- diag(c(0.5, 0))
+  fits <- lapply(c(EUR = 1, AFR = 1, AMR = 1), function(unused) {
+    structure(
+      list(
+        covariance = target,
+        lambda = 0,
+        target_covariance = target,
+        source_covariance = target + direction,
+        target_variance = 0.6,
+        source_variance = NA_real_
+      ),
+      class = "cov_tl"
     )
   })
-  gains <- c(EUR = 0.1, AFR = 0.3, AMR = -0.1)
-  for (source_name in names(fits)) {
-    fits[[source_name]]$reconstruction_gain <- gains[source_name]
-  }
 
   fit <- multi_source_tl(fits)
 
-  expect_s3_class(fit, "multi_source_tl")
-  expect_identical(fit$fit_family, "eigen_tl")
-  expect_identical(fit$aggregation, "reuse_cv_reconstruction_gain")
-  expect_equal(fit$signed_gains, gains)
-  expect_equal(fit$weights, c(EUR = 0.25, AFR = 0.75, AMR = 0))
-  expect_equal(sum(diag(fit$projector)), 1, tolerance = 1e-10)
-  expect_equal(
-    fit$projector %*% fit$projector,
-    fit$projector,
-    tolerance = 1e-10
-  )
-  expect_equal(sum(fit$weights), 1)
+  expect_equal(sum(fit$source_weights), 1)
+  expect_true(all(fit$source_weights >= 0))
+  expect_equal(fit$target_weight, 0)
+  expect_equal(fit$covariance, target + direction)
 })
 
-test_that("multi_source_tl validates fit families, folds, and priors", {
+test_that("multi_source_tl keeps source variance as a diagnostic", {
+  target <- diag(2)
+  fits <- lapply(c(EUR = 0.1, AFR = 0.2), function(source_variance) {
+    structure(
+      list(
+        covariance = target,
+        lambda = 0,
+        target_covariance = target,
+        source_covariance = target,
+        target_variance = 0.3,
+        source_variance = source_variance
+      ),
+      class = "cov_tl"
+    )
+  })
+
+  fit <- multi_source_tl(fits)
+
+  expect_equal(diag(fit$gram), c(EUR = 0, AFR = 0))
+  expect_equal(fit$source_variance, c(EUR = 0.1, AFR = 0.2))
+})
+
+test_that("multi_source_tl rejects incompatible and EigenTL fits", {
   X <- matrix(rnorm(24), 12, 2)
   cov_fit <- cov_tl(X, diag(2))
-  fold_id <- rep(1:3, 4)
   eigen_fit <- eigen_tl(
     X,
     diag(2),
     rank = 1,
     n_source = 20,
-    fold_id = fold_id
+    fold_id = rep(1:3, 4)
   )
 
   expect_error(
     multi_source_tl(list(EUR = cov_fit, AFR = eigen_fit)),
-    "only cov_tl objects or only eigen_tl objects"
-  )
-  expect_error(
-    multi_source_tl(list(EUR = cov_fit, AFR = cov_fit), prior = c(1, -1)),
-    "nonnegative"
+    "requires cross-source held-out path terms"
   )
 
-  other_fold <- eigen_fit
-  other_fold$fold_id <- rev(other_fold$fold_id)
+  other_target <- cov_fit
+  other_target$target_covariance[1, 1] <-
+    other_target$target_covariance[1, 1] + 1
   expect_error(
-    multi_source_tl(list(EUR = eigen_fit, AFR = other_fold)),
-    "identical target folds"
-  )
-
-  other_method <- eigen_fit
-  other_method$method <- "min"
-  expect_error(
-    multi_source_tl(list(EUR = eigen_fit, AFR = other_method)),
-    "same method"
+    multi_source_tl(list(EUR = cov_fit, AFR = other_target)),
+    "same target covariance"
   )
 })

@@ -113,9 +113,9 @@ multisource_cov_tl <- function(X_target, sources, center = TRUE) {
 #' @param sources Named list of at least two `ldtl_source_moments` objects or
 #'   source covariance matrices.
 #' @param rank Eigenspace size. A number strictly between zero and one is the
-#'   target cumulative explained-variance threshold, computed separately from
-#'   each target training fold and from the full target data. A positive
-#'   integer is a fixed rank shared by all fits.
+#'   cumulative explained-variance threshold computed once from the full target
+#'   data. A positive integer is a fixed rank. The resulting integer rank is
+#'   shared by every target fold and path candidate.
 #' @param folds Number of target validation folds.
 #' @param transfer_weight_grid Strictly increasing direct covariance weights in
 #'   `[0, 1]`, including zero and one.
@@ -128,6 +128,11 @@ multisource_cov_tl <- function(X_target, sources, center = TRUE) {
 #'   minimum reconstruction-risk candidate.
 #' @param standard_error_multiplier Nonnegative multiplier for `method =
 #'   "one_se"`. The default is one.
+#' @param eigen_solver Eigensolver used after the integer rank is fixed.
+#'   `"full"` uses the existing CppMatrix full eigendecomposition. `"rspectra"`
+#'   independently activates RSpectra and computes only the leading `rank`
+#'   eigenpairs. A fractional `rank` still requires one full-target
+#'   eigendecomposition to determine the common integer cutoff.
 #'
 #' @return An object inheriting from `eigen_tl`. It contains the selected
 #'   covariance and eigenspace, full and fold-specific source compositions,
@@ -145,9 +150,11 @@ multisource_eigen_tl <- function(
     center = TRUE,
     fold_id = NULL,
     method = c("one_se", "min"),
-    standard_error_multiplier = 1
+    standard_error_multiplier = 1,
+    eigen_solver = c("full", "rspectra")
 ) {
   method <- match.arg(method)
+  eigen_solver <- match.arg(eigen_solver)
   X_target <- .ld_as_matrix(X_target, "X_target")
   if (nrow(X_target) < 2L || ncol(X_target) < 2L ||
       any(!is.finite(X_target))) {
@@ -171,6 +178,26 @@ multisource_eigen_tl <- function(
   fold_levels <- sort(unique(fold_id))
   n_folds <- length(fold_levels)
   n_candidates <- length(path_weights)
+
+  if (isTRUE(center)) {
+    full_mean <- colMeans(X_target)
+    X_full <- sweep(X_target, 2L, full_mean, "-")
+  } else {
+    X_full <- X_target
+  }
+  target_full <- .ld_tl_target_moments(X_full, center = FALSE)
+  target_eig <- NULL
+  if (rank_spec$type == "fixed") {
+    effective_rank <- rank_spec$value
+  } else {
+    target_eig <- .ld_eigen(target_full$covariance)
+    effective_rank <- .ld_tl_effective_rank(
+      rank_spec,
+      target_eig$values,
+      p
+    )
+  }
+
   observation_scores <- matrix(NA_real_, n_target, n_candidates)
   fold_source_weights <- matrix(
     NA_real_,
@@ -188,7 +215,7 @@ multisource_eigen_tl <- function(
   )
   fold_covtl_transfer_weights <- numeric(n_folds)
   fold_grams <- vector("list", n_folds)
-  fold_effective_ranks <- integer(n_folds)
+  fold_effective_ranks <- rep.int(effective_rank, n_folds)
 
   for (fold_index in seq_along(fold_levels)) {
     validation_indices <- which(fold_id == fold_levels[fold_index])
@@ -207,13 +234,11 @@ multisource_eigen_tl <- function(
       X_validation <- sweep(X_validation, 2L, training_mean, "-")
     }
     target_fit <- .ld_tl_target_moments(X_fit, center = FALSE)
-    target_eig <- .ld_eigen(target_fit$covariance)
-    fold_rank <- .ld_tl_effective_rank(
-      rank_spec,
-      target_eig$values,
-      p
+    fold_target_eig <- .ld_eigen_leading(
+      target_fit$covariance,
+      effective_rank,
+      eigen_solver
     )
-    fold_effective_ranks[fold_index] <- fold_rank
     gram <- cpp_multi_source_gram(
       target_fit$covariance,
       source_covariances
@@ -244,12 +269,16 @@ multisource_eigen_tl <- function(
           weight * source_covariance
       )
       candidate_eig <- if (candidate_index == 1L) {
-        target_eig
+        fold_target_eig
       } else {
-        .ld_eigen(candidate_covariance)
+        .ld_eigen_leading(
+          candidate_covariance,
+          effective_rank,
+          eigen_solver
+        )
       }
       candidate_vectors <-
-        candidate_eig$vectors[, seq_len(fold_rank), drop = FALSE]
+        candidate_eig$vectors
       validation_projection <- .ld_matrix_multiply(
         X_validation,
         candidate_vectors
@@ -266,25 +295,6 @@ multisource_eigen_tl <- function(
     standard_error_multiplier = standard_error_multiplier
   )
 
-  if (isTRUE(center)) {
-    full_mean <- colMeans(X_target)
-    X_full <- sweep(X_target, 2L, full_mean, "-")
-  } else {
-    full_mean <- rep(0, p)
-    X_full <- X_target
-  }
-  target_full <- .ld_tl_target_moments(X_full, center = FALSE)
-  target_eig <- NULL
-  if (rank_spec$type == "fixed") {
-    effective_rank <- rank_spec$value
-  } else {
-    target_eig <- .ld_eigen(target_full$covariance)
-    effective_rank <- .ld_tl_effective_rank(
-      rank_spec,
-      target_eig$values,
-      p
-    )
-  }
   full_gram <- cpp_multi_source_gram(
     target_full$covariance,
     source_covariances
@@ -302,11 +312,14 @@ multisource_eigen_tl <- function(
       selected_weight * full_source_covariance
   )
   fit_eig <- if (selection$selected_index == 1L && !is.null(target_eig)) {
-    target_eig
+    list(
+      values = target_eig$values[seq_len(effective_rank)],
+      vectors = target_eig$vectors[, seq_len(effective_rank), drop = FALSE]
+    )
   } else {
-    .ld_eigen(covariance)
+    .ld_eigen_leading(covariance, effective_rank, eigen_solver)
   }
-  vectors <- fit_eig$vectors[, seq_len(effective_rank), drop = FALSE]
+  vectors <- fit_eig$vectors
   projector <- .ld_symmetrize(
     .ld_matrix_multiply(vectors, vectors, transB = TRUE)
   )
@@ -331,7 +344,7 @@ multisource_eigen_tl <- function(
       covariance = covariance,
       vectors = vectors,
       projector = projector,
-      eigenvalues = fit_eig$values[seq_len(effective_rank)],
+      eigenvalues = fit_eig$values,
       effective_rank = effective_rank,
       fold_effective_ranks = fold_effective_ranks,
       selected_index = selection$selected_index,

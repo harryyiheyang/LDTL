@@ -68,6 +68,34 @@
   list(values = values[ord], vectors = vectors[, ord, drop = FALSE])
 }
 
+.ld_eigen_leading <- function(x, rank, eigen_solver) {
+  x <- .ld_symmetrize(x)
+  p <- nrow(x)
+  if (eigen_solver == "full" || rank >= p - 1L) {
+    eig <- .ld_eigen(x)
+    return(list(
+      values = eig$values[seq_len(rank)],
+      vectors = eig$vectors[, seq_len(rank), drop = FALSE]
+    ))
+  }
+  if (!requireNamespace("RSpectra", quietly = TRUE)) {
+    stop(
+      "eigen_solver = \"rspectra\" requires the RSpectra package.",
+      call. = FALSE
+    )
+  }
+  eig <- RSpectra::eigs_sym(x, k = rank, which = "LA")
+  if (eig$nconv != rank || length(eig$values) != rank ||
+      any(!is.finite(eig$values)) || any(!is.finite(eig$vectors))) {
+    stop("RSpectra did not return all requested finite eigenpairs.", call. = FALSE)
+  }
+  ord <- order(eig$values, decreasing = TRUE)
+  list(
+    values = as.numeric(eig$values[ord]),
+    vectors = eig$vectors[, ord, drop = FALSE]
+  )
+}
+
 .ld_min_eigen <- function(x) {
   x <- .ld_symmetrize(x)
   values <- tryCatch(

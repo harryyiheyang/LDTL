@@ -274,9 +274,9 @@ cov_tl <- function(X_target, source, center = TRUE) {
 #' @param X_target Target individual-level data matrix.
 #' @param source An `ldtl_source_moments` object or a source covariance matrix.
 #' @param rank Eigenspace size. A number strictly between zero and one is the
-#'   target cumulative explained-variance threshold, computed separately from
-#'   each target training fold and from the full target data. A positive
-#'   integer is a fixed rank shared by all fits.
+#'   cumulative explained-variance threshold computed once from the full target
+#'   data. A positive integer is a fixed rank. The resulting integer rank is
+#'   shared by every target fold and path candidate.
 #' @param n_source Source sample size. Required when `source` is a matrix and
 #'   checked against the stored sample size when source moments are supplied.
 #' @param folds Number of target validation folds.
@@ -291,6 +291,11 @@ cov_tl <- function(X_target, source, center = TRUE) {
 #'   minimum reconstruction-risk candidate.
 #' @param standard_error_multiplier Nonnegative multiplier for `method =
 #'   "one_se"`. The default is one.
+#' @param eigen_solver Eigensolver used after the integer rank is fixed.
+#'   `"full"` uses the existing CppMatrix full eigendecomposition. `"rspectra"`
+#'   independently activates RSpectra and computes only the leading `rank`
+#'   eigenpairs. A fractional `rank` still requires one full-target
+#'   eigendecomposition to determine the common integer cutoff.
 #'
 #' @return An object of class `eigen_tl` containing the selected full-data
 #'   covariance, eigenspace, complete held-out path scores, paired uncertainty,
@@ -308,9 +313,11 @@ eigen_tl <- function(
     center = TRUE,
     fold_id = NULL,
     method = c("one_se", "min"),
-    standard_error_multiplier = 1
+    standard_error_multiplier = 1,
+    eigen_solver = c("full", "rspectra")
 ) {
   method <- match.arg(method)
+  eigen_solver <- match.arg(eigen_solver)
   .ld_eigen_tl_fit(
     X_target = X_target,
     source = source,
@@ -321,7 +328,8 @@ eigen_tl <- function(
     center = center,
     fold_id = fold_id,
     selector = method,
-    standard_error_multiplier = standard_error_multiplier
+    standard_error_multiplier = standard_error_multiplier,
+    eigen_solver = eigen_solver
   )
 }
 
@@ -335,7 +343,8 @@ eigen_tl <- function(
     center,
     fold_id,
     selector,
-    standard_error_multiplier
+    standard_error_multiplier,
+    eigen_solver
 ) {
   X_target <- .ld_as_matrix(X_target, "X_target")
   if (nrow(X_target) < 2L || ncol(X_target) < 2L ||
@@ -357,13 +366,35 @@ eigen_tl <- function(
   fold_id <- .ld_path_fold_id(n_target, folds, fold_id)
   fold_levels <- sort(unique(fold_id))
   n_candidates <- length(zeta)
+
+  if (isTRUE(center)) {
+    full_mean <- colMeans(X_target)
+    X_full <- sweep(X_target, 2L, full_mean, "-")
+  } else {
+    X_full <- X_target
+  }
+  target_covariance <- .ld_symmetrize(
+    .ld_matrix_multiply(X_full, X_full, transA = TRUE) / n_target
+  )
+  target_eig <- NULL
+  if (rank_spec$type == "fixed") {
+    effective_rank <- rank_spec$value
+  } else {
+    target_eig <- .ld_eigen(target_covariance)
+    effective_rank <- .ld_tl_effective_rank(
+      rank_spec,
+      target_eig$values,
+      p
+    )
+  }
+
   observation_scores <- matrix(NA_real_, n_target, n_candidates)
   fold_weights <- matrix(
     NA_real_,
     nrow = length(fold_levels),
     ncol = n_candidates
   )
-  fold_effective_ranks <- integer(length(fold_levels))
+  fold_effective_ranks <- rep.int(effective_rank, length(fold_levels))
 
   for (fold_index in seq_along(fold_levels)) {
     validation_indices <- which(fold_id == fold_levels[fold_index])
@@ -382,9 +413,11 @@ eigen_tl <- function(
     S_fit <- .ld_symmetrize(
       .ld_matrix_multiply(X_fit, X_fit, transA = TRUE) / n_fit
     )
-    target_eig <- .ld_eigen(S_fit)
-    fold_rank <- .ld_tl_effective_rank(rank_spec, target_eig$values, p)
-    fold_effective_ranks[fold_index] <- fold_rank
+    fold_target_eig <- .ld_eigen_leading(
+      S_fit,
+      effective_rank,
+      eigen_solver
+    )
     weights <- .ld_path_weights(zeta, n_fit, n_source)
     fold_weights[fold_index, ] <- weights
 
@@ -394,12 +427,16 @@ eigen_tl <- function(
           weights[candidate_index] * source_resolved$covariance
       )
       candidate_eig <- if (candidate_index == 1L) {
-        target_eig
+        fold_target_eig
       } else {
-        .ld_eigen(candidate_covariance)
+        .ld_eigen_leading(
+          candidate_covariance,
+          effective_rank,
+          eigen_solver
+        )
       }
       candidate_vectors <-
-        candidate_eig$vectors[, seq_len(fold_rank), drop = FALSE]
+        candidate_eig$vectors
       validation_projection <- .ld_matrix_multiply(
         X_validation,
         candidate_vectors
@@ -442,27 +479,6 @@ eigen_tl <- function(
     selected_index <- max(which(competitive))
   }
 
-  if (isTRUE(center)) {
-    full_mean <- colMeans(X_target)
-    X_full <- sweep(X_target, 2L, full_mean, "-")
-  } else {
-    full_mean <- rep(0, p)
-    X_full <- X_target
-  }
-  target_covariance <- .ld_symmetrize(
-    .ld_matrix_multiply(X_full, X_full, transA = TRUE) / n_target
-  )
-  target_eig <- NULL
-  if (rank_spec$type == "fixed") {
-    effective_rank <- rank_spec$value
-  } else {
-    target_eig <- .ld_eigen(target_covariance)
-    effective_rank <- .ld_tl_effective_rank(
-      rank_spec,
-      target_eig$values,
-      p
-    )
-  }
   full_weights <- .ld_path_weights(zeta, n_target, n_source)
   selected_weight <- full_weights[selected_index]
   covariance <- .ld_symmetrize(
@@ -470,11 +486,14 @@ eigen_tl <- function(
       selected_weight * source_resolved$covariance
   )
   fit_eig <- if (selected_index == 1L && !is.null(target_eig)) {
-    target_eig
+    list(
+      values = target_eig$values[seq_len(effective_rank)],
+      vectors = target_eig$vectors[, seq_len(effective_rank), drop = FALSE]
+    )
   } else {
-    .ld_eigen(covariance)
+    .ld_eigen_leading(covariance, effective_rank, eigen_solver)
   }
-  vectors <- fit_eig$vectors[, seq_len(effective_rank), drop = FALSE]
+  vectors <- fit_eig$vectors
   projector <- .ld_symmetrize(
     .ld_matrix_multiply(vectors, vectors, transB = TRUE)
   )
@@ -487,7 +506,7 @@ eigen_tl <- function(
       covariance = covariance,
       vectors = vectors,
       projector = projector,
-      eigenvalues = fit_eig$values[seq_len(effective_rank)],
+      eigenvalues = fit_eig$values,
       effective_rank = effective_rank,
       fold_effective_ranks = fold_effective_ranks,
       selected_index = selected_index,

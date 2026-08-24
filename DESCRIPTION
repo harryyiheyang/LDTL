@@ -1,7 +1,7 @@
 Package: LDTL
 Type: Package
 Title: Linkage Disequilibrium Transfer Learning
-Version: 0.2.0
+Version: 0.2.1
 Authors@R: person("Yihe", "Yang", email = "yxy1234@case.edu",
     role = c("aut", "cre"))
 Description: Provides single-source and multi-source transfer learning for
@@ -21,6 +21,7 @@ LinkingTo:
     Rcpp,
     RcppArmadillo
 Suggests:
+    RSpectra,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
 Config/roxygen2/version: 8.1.0

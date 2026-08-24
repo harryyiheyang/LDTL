@@ -13,7 +13,8 @@ multisource_eigen_tl(
   center = TRUE,
   fold_id = NULL,
   method = c("one_se", "min"),
-  standard_error_multiplier = 1
+  standard_error_multiplier = 1,
+  eigen_solver = c("full", "rspectra")
 )
 }
 \arguments{
@@ -24,9 +25,9 @@ rows.}
 source covariance matrices.}
 
 \item{rank}{Eigenspace size. A number strictly between zero and one is the
-target cumulative explained-variance threshold, computed separately from
-each target training fold and from the full target data. A positive
-integer is a fixed rank shared by all fits.}
+cumulative explained-variance threshold computed once from the full target
+data. A positive integer is a fixed rank. The resulting integer rank is
+shared by every target fold and path candidate.}
 
 \item{folds}{Number of target validation folds.}
 
@@ -45,6 +46,12 @@ minimum reconstruction-risk candidate.}
 
 \item{standard_error_multiplier}{Nonnegative multiplier for `method =
 "one_se"`. The default is one.}
+
+\item{eigen_solver}{Eigensolver used after the integer rank is fixed.
+`"full"` uses the existing CppMatrix full eigendecomposition. `"rspectra"`
+independently activates RSpectra and computes only the leading `rank`
+eigenpairs. A fractional `rank` still requires one full-target
+eigendecomposition to determine the common integer cutoff.}
 }
 \value{
 An object inheriting from `eigen_tl`. It contains the selected

@@ -58,16 +58,19 @@ fit_eigen <- eigen_tl(
   source_eur,
   rank = 0.99,
   fold_id = fold_id,
-  method = "one_se"
+  method = "one_se",
+  eigen_solver = "rspectra"
 )
 P_eigen <- fit_eigen$projector
 ```
 
 Set `rank` to a positive integer for a fixed eigenspace dimension, or to a
 number strictly between zero and one for a target cumulative explained-variance
-threshold. For example, `rank = 0.99` learns K99 from each target training fold
-and again from the full target data; every source/path candidate within a fold
-uses the same learned rank.
+threshold. For example, `rank = 0.99` learns K99 once from the full target data
+and uses that same integer rank in every target fold and path candidate. When
+K99 is already available, pass the integer directly. The opt-in
+`eigen_solver = "rspectra"` backend computes only those leading eigenpairs;
+the default `"full"` backend preserves the original CppMatrix behavior.
 
 `method = "min"` selects the maximum held-out score. The default
 `method = "one_se"` selects the most transferred statistically competitive
@@ -93,7 +96,8 @@ fit_multi_eigen <- multisource_eigen_tl(
   sources,
   rank = 0.99,
   fold_id = fold_id,
-  method = "one_se"
+  method = "one_se",
+  eigen_solver = "rspectra"
 )
 P_multi_eigen <- fit_multi_eigen$projector
 ```

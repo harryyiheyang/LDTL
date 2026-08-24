@@ -86,16 +86,98 @@ test_that("EigenTL rank accepts a fixed dimension or target variance fraction", 
     X, sources, rank = 0.8,
     fold_id = fold_id, center = FALSE, method = "min"
   )
+  E <- LDTL:::.ld_eigen(crossprod(X) / nrow(X))
+  expected_rank <- which(
+    cumsum(pmax(E$values, 0)) / sum(pmax(E$values, 0)) >= 0.8
+  )[1L]
 
   expect_equal(fixed$effective_rank, 2L)
   expect_equal(fixed$fold_effective_ranks, rep(2L, 3))
   expect_equal(ncol(fixed$vectors), 2L)
-  expect_equal(fractional$effective_rank, 1L)
-  expect_equal(fractional$fold_effective_ranks, rep(1L, 3))
-  expect_equal(ncol(fractional$vectors), 1L)
-  expect_equal(multi_fractional$effective_rank, 1L)
-  expect_equal(multi_fractional$fold_effective_ranks, rep(1L, 3))
-  expect_equal(ncol(multi_fractional$vectors), 1L)
+  expect_equal(fractional$effective_rank, expected_rank)
+  expect_equal(
+    fractional$fold_effective_ranks,
+    rep(expected_rank, 3)
+  )
+  expect_equal(ncol(fractional$vectors), expected_rank)
+  expect_equal(multi_fractional$effective_rank, expected_rank)
+  expect_equal(
+    multi_fractional$fold_effective_ranks,
+    rep(expected_rank, 3)
+  )
+  expect_equal(ncol(multi_fractional$vectors), expected_rank)
+})
+
+test_that("RSpectra EigenTL agrees with the full eigensolver", {
+  skip_if_not_installed("RSpectra")
+  set.seed(29)
+  X <- matrix(rnorm(640), 80, 8)
+  X <- sweep(X, 2, seq(0.5, 1.2, length.out = 8), "*")
+  Z1 <- X + matrix(rnorm(640, sd = 0.15), 80, 8)
+  Z2 <- X + matrix(rnorm(640, sd = 0.3), 80, 8)
+  source1 <- source_moments(Z1, center = TRUE)
+  sources <- list(
+    EUR = source1,
+    AFR = source_moments(Z2, center = TRUE)
+  )
+  fold_id <- rep(1:5, length.out = nrow(X))
+  grid <- c(0, 0.25, 0.5, 0.75, 1)
+
+  single_full <- eigen_tl(
+    X, source1, rank = 3, fold_id = fold_id,
+    source_fraction_grid = grid, method = "one_se",
+    eigen_solver = "full"
+  )
+  set.seed(29)
+  single_partial <- eigen_tl(
+    X, source1, rank = 3, fold_id = fold_id,
+    source_fraction_grid = grid, method = "one_se",
+    eigen_solver = "rspectra"
+  )
+  multi_full <- multisource_eigen_tl(
+    X, sources, rank = 3, fold_id = fold_id,
+    transfer_weight_grid = grid, method = "one_se",
+    eigen_solver = "full"
+  )
+  set.seed(29)
+  multi_partial <- multisource_eigen_tl(
+    X, sources, rank = 3, fold_id = fold_id,
+    transfer_weight_grid = grid, method = "one_se",
+    eigen_solver = "rspectra"
+  )
+
+  expect_equal(
+    single_partial$observation_scores,
+    single_full$observation_scores,
+    tolerance = 1e-7
+  )
+  expect_equal(single_partial$selected_index, single_full$selected_index)
+  expect_equal(
+    single_partial$eigenvalues,
+    single_full$eigenvalues,
+    tolerance = 1e-8
+  )
+  expect_equal(
+    single_partial$projector,
+    single_full$projector,
+    tolerance = 1e-7
+  )
+  expect_equal(
+    multi_partial$observation_scores,
+    multi_full$observation_scores,
+    tolerance = 1e-7
+  )
+  expect_equal(multi_partial$selected_index, multi_full$selected_index)
+  expect_equal(
+    multi_partial$eigenvalues,
+    multi_full$eigenvalues,
+    tolerance = 1e-8
+  )
+  expect_equal(
+    multi_partial$projector,
+    multi_full$projector,
+    tolerance = 1e-7
+  )
 })
 
 test_that("Frobenius distance is stable for nearly equal large matrices", {

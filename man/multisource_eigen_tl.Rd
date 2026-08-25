@@ -56,8 +56,7 @@ eigendecomposition to determine the common integer cutoff.}
 \value{
 An object inheriting from `eigen_tl`. It contains the selected
   covariance and eigenspace, full and fold-specific source compositions,
-  complete held-out scores, and the full-data joint CovTL estimator using
-  the same source library.
+  and complete held-out scores.
 }
 \description{
 Learn one convex source direction jointly from all supplied source
@@ -72,10 +71,9 @@ is fitted to
 }
 \details{
 The source summaries are resolved once and reused in every target fold.
-Target covariance and target variance are re-estimated independently in
-every training fold. The target variance is retained for the corresponding
-joint CovTL fit but is not used to choose the source composition or EigenTL
-path weight.
+Target covariance and source composition are re-estimated independently in
+every training fold. CovTL is a separate estimator and is not fitted or
+returned by this function.
 
 `method = "one_se"` returns the most transferred candidate whose paired
 held-out target-score deficit is within one standard error of the empirical

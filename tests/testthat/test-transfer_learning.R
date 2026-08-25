@@ -655,11 +655,7 @@ test_that("multi-source EigenTL relearns target moments and direction by fold", 
     fold_id = fold_id,
     method = "min"
   )
-  cov_fit <- multisource_cov_tl(X, sources, center = FALSE)
-
-  expected_variances <- numeric(3)
   expected_fold_weights <- matrix(NA_real_, 3, 3)
-  expected_covtl_weights <- matrix(NA_real_, 3, 3)
   for (v in 1:3) {
     X_fit <- X[fold_id != v, , drop = FALSE]
     target <- LDTL:::.ld_tl_target_moments(
@@ -671,28 +667,13 @@ test_that("multi-source EigenTL relearns target moments and direction by fold", 
       sources
     )
     direction <- LDTL:::.ld_multi_source_composition_qp(A)
-    covtl <- LDTL:::.ld_multi_source_qp(
-      A,
-      rep(target$variance, 3)
-    )
-    expected_variances[v] <- target$variance
     expected_fold_weights[v, ] <- direction$coefficients
-    expected_covtl_weights[v, ] <- covtl$coefficients
   }
 
   expect_s3_class(fit, "multisource_eigen_tl")
   expect_s3_class(fit, "eigen_tl")
   expect_equal(fit$path_weights, weights)
-  expect_equal(fit$fold_target_variances, expected_variances)
   expect_equal(unname(fit$fold_source_weights), expected_fold_weights)
-  expect_equal(
-    unname(fit$fold_covtl_source_weights),
-    expected_covtl_weights
-  )
-  expect_equal(
-    fit$fold_covtl_transfer_weights,
-    rowSums(expected_covtl_weights)
-  )
   expect_equal(unname(rowSums(fit$fold_source_weights)), rep(1, 3))
   expect_equal(sum(fit$source_weights), 1)
   expect_true(all(fit$source_weights >= 0))
@@ -708,13 +689,12 @@ test_that("multi-source EigenTL relearns target moments and direction by fold", 
     (1 - fit$selected_weight) * target_full +
       fit$selected_weight * source_full
   )
-  expect_equal(fit$covtl_covariance, cov_fit$covariance)
-  expect_equal(fit$covtl_source_weights, cov_fit$source_weights)
-  expect_equal(
-    unname(fit$covtl_source_weights / fit$covtl_transfer_weight),
-    unname(fit$source_weights),
-    tolerance = 1e-10
-  )
+  expect_null(fit$fold_covtl_source_weights)
+  expect_null(fit$fold_covtl_transfer_weights)
+  expect_null(fit$covtl_covariance)
+  expect_null(fit$covtl_source_weights)
+  expect_null(fit$covtl_target_weight)
+  expect_null(fit$covtl_transfer_weight)
   expect_equal(sum(diag(fit$projector)), 1, tolerance = 1e-10)
   expect_equal(
     fit$projector %*% fit$projector,

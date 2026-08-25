@@ -98,10 +98,9 @@ multisource_cov_tl <- function(X_target, sources, center = TRUE) {
 #' \deqn{C(w)=(1-w)T+w\sum_s\widehat\pi_sS_s.}
 #'
 #' The source summaries are resolved once and reused in every target fold.
-#' Target covariance and target variance are re-estimated independently in
-#' every training fold. The target variance is retained for the corresponding
-#' joint CovTL fit but is not used to choose the source composition or EigenTL
-#' path weight.
+#' Target covariance and source composition are re-estimated independently in
+#' every training fold. CovTL is a separate estimator and is not fitted or
+#' returned by this function.
 #'
 #' `method = "one_se"` returns the most transferred candidate whose paired
 #' held-out target-score deficit is within one standard error of the empirical
@@ -136,8 +135,7 @@ multisource_cov_tl <- function(X_target, sources, center = TRUE) {
 #'
 #' @return An object inheriting from `eigen_tl`. It contains the selected
 #'   covariance and eigenspace, full and fold-specific source compositions,
-#'   complete held-out scores, and the full-data joint CovTL estimator using
-#'   the same source library.
+#'   and complete held-out scores.
 #' @export
 multisource_eigen_tl <- function(
     X_target,
@@ -205,15 +203,7 @@ multisource_eigen_tl <- function(
     ncol = n_sources,
     dimnames = list(as.character(fold_levels), source_names)
   )
-  fold_target_variances <- numeric(n_folds)
   fold_source_distances <- numeric(n_folds)
-  fold_covtl_source_weights <- matrix(
-    NA_real_,
-    nrow = n_folds,
-    ncol = n_sources,
-    dimnames = list(as.character(fold_levels), source_names)
-  )
-  fold_covtl_transfer_weights <- numeric(n_folds)
   fold_grams <- vector("list", n_folds)
   fold_effective_ranks <- rep.int(effective_rank, n_folds)
 
@@ -251,15 +241,7 @@ multisource_eigen_tl <- function(
       direction$coefficients
     )
     fold_source_weights[fold_index, ] <- direction$coefficients
-    fold_target_variances[fold_index] <- target_fit$variance
     fold_source_distances[fold_index] <- direction$objective
-    covtl_fold <- .ld_multi_source_qp(
-      gram,
-      rep(target_fit$variance, n_sources)
-    )
-    fold_covtl_source_weights[fold_index, ] <- covtl_fold$coefficients
-    fold_covtl_transfer_weights[fold_index] <-
-      sum(covtl_fold$coefficients)
     fold_grams[[fold_index]] <- gram
 
     for (candidate_index in seq_along(path_weights)) {
@@ -324,17 +306,6 @@ multisource_eigen_tl <- function(
     .ld_matrix_multiply(vectors, vectors, transB = TRUE)
   )
 
-  covtl_solution <- .ld_multi_source_qp(
-    full_gram,
-    rep(target_full$variance, n_sources)
-  )
-  covtl_source_weights <- covtl_solution$coefficients
-  names(covtl_source_weights) <- source_names
-  covtl_covariance <- cpp_multi_source_combine(
-    target_full$covariance,
-    source_covariances,
-    covtl_source_weights
-  )
   selected_score <- selection$mean_scores[selection$selected_index]
   target_score <- selection$mean_scores[1L]
   reconstruction_gain <- selected_score - target_score
@@ -369,15 +340,7 @@ multisource_eigen_tl <- function(
       source_distance_squared = full_direction$objective,
       fold_source_distances = fold_source_distances,
       gram = full_gram,
-      fold_grams = fold_grams,
-      target_variance = target_full$variance,
-      fold_target_variances = fold_target_variances,
-      fold_covtl_source_weights = fold_covtl_source_weights,
-      fold_covtl_transfer_weights = fold_covtl_transfer_weights,
-      covtl_covariance = covtl_covariance,
-      covtl_source_weights = covtl_source_weights,
-      covtl_target_weight = 1 - sum(covtl_source_weights),
-      covtl_transfer_weight = sum(covtl_source_weights)
+      fold_grams = fold_grams
     ),
     class = c("multisource_eigen_tl", "eigen_tl")
   )

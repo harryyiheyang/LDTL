@@ -1,7 +1,7 @@
 Package: LDTL
 Type: Package
 Title: Linkage Disequilibrium Transfer Learning
-Version: 0.2.1
+Version: 0.2.2
 Authors@R: person("Yihe", "Yang", email = "yxy1234@case.edu",
     role = c("aut", "cre"))
 Description: Provides single-source and multi-source transfer learning for

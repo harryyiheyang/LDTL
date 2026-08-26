@@ -6,7 +6,7 @@
 \alias{LDTL-package}
 \title{LDTL native registration}
 \description{
-Provides single-source and multi-source transfer learning for linkage disequilibrium covariance matrices and eigenspaces. The package includes tuning-free covariance transfer, fold-wise reconstruction-based eigenspace transfer, reusable large-source moment summaries, standard POET extensions, and conventional covariance regularizers. Large matrix operations use CppMatrix and native streaming kernels where possible.
+Provides single-source and multi-source transfer learning for linkage disequilibrium covariance matrices and eigenspaces. The package includes tuning-free covariance transfer, summary-statistic multi-source covariance transfer, fold-wise reconstruction-based eigenspace transfer, reusable large-source moment summaries, standard POET extensions, and conventional covariance regularizers. Large matrix operations use CppMatrix and native streaming kernels where possible.
 }
 \author{
 \strong{Maintainer}: Yihe Yang \email{yxy1234@case.edu}

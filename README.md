@@ -13,9 +13,11 @@ library(LDTL)
 
 ## Core transfer-learning methods
 
-The four primary estimators are:
+The primary estimators are:
 
 - `cov_tl()`: tuning-free single-source covariance transfer;
+- `CovTL_SS()`: multi-source covariance transfer from null-locus summary
+  statistics;
 - `eigen_tl()`: single-source reconstruction-selected eigenspace path;
 - `multisource_cov_tl()`: tuning-free joint multi-source covariance transfer;
 - `multisource_eigen_tl()`: a fold-wise joint source composition followed by
@@ -49,6 +51,27 @@ fit_cov <- cov_tl(X_target, source_eur)
 R_cov <- fit_cov$covariance
 fit_cov$lambda
 ```
+
+### Summary-statistic multi-source covariance transfer
+
+```r
+z_null <- list(locus_1 = z1, locus_2 = z2, locus_3 = z3)
+source_ld <- list(
+  locus_1 = list(`1000G` = R1_1000G, UKB = R1_UKB, AoU = R1_AoU),
+  locus_2 = list(`1000G` = R2_1000G, UKB = R2_UKB, AoU = R2_AoU),
+  locus_3 = list(`1000G` = R3_1000G, UKB = R3_UKB, AoU = R3_AoU)
+)
+
+fit_ss <- CovTL_SS(z_null, source_ld)
+fit_ss$weights
+R_null <- fit_ss$covariance
+fit_ss$fisher_min_eigenvalue
+```
+
+Each source can also be supplied as a full-rank or truncated eigensystem
+`list(U = U, D = D)`. The source matrices are converted to correlations before
+the shared source and identity weights are fitted. The original `cov_tl()`
+individual-level estimator is unchanged.
 
 ### Single-source eigenspace transfer
 

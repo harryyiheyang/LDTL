@@ -1,15 +1,16 @@
 Package: LDTL
 Type: Package
 Title: Linkage Disequilibrium Transfer Learning
-Version: 0.2.2
+Version: 0.2.3
 Authors@R: person("Yihe", "Yang", email = "yxy1234@case.edu",
     role = c("aut", "cre"))
 Description: Provides single-source and multi-source transfer learning for
     linkage disequilibrium covariance matrices and eigenspaces. The package
-    includes tuning-free covariance transfer, fold-wise reconstruction-based
-    eigenspace transfer, reusable large-source moment summaries, standard
-    POET extensions, and conventional covariance regularizers. Large matrix
-    operations use CppMatrix and native streaming kernels where possible.
+    includes tuning-free covariance transfer, summary-statistic multi-source
+    covariance transfer, fold-wise reconstruction-based eigenspace transfer,
+    reusable large-source moment summaries, standard POET extensions, and
+    conventional covariance regularizers. Large matrix operations use
+    CppMatrix and native streaming kernels where possible.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: 
